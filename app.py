@@ -20,6 +20,8 @@ from anki.browser import BrowserConfig
 from anki.config import Config
 from anki.utils import ids2str
 
+from flashcards.io_review import IO_REVIEW_JS
+
 DATA = os.environ.get("DATA_DIR", os.path.join(os.path.dirname(__file__), "data"))
 os.makedirs(DATA, exist_ok=True)
 USERS_FILE = os.path.join(DATA, "users.json")
@@ -365,6 +367,8 @@ window.frameElement.dispatchEvent(new Event("fc-resize"))}catch(e){}})}}};</scri
 
 def card_doc(inner, night=False):
     mj = MATHJAX if MATHJAX_PAT.search(inner) else ""
+    if "anki.imageOcclusion" in inner:   # Image Occlusion cards: draw the masks (flashcards/io_review.py)
+        mj += IO_REVIEW_JS
     return f"""<!doctype html><html class="{'night_mode' if night else ''}"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><base href="/media/">
 <style>html,body{{margin:0;padding:0}}body{{padding:20px;font-family:-apple-system,system-ui,sans-serif}}
@@ -1317,3 +1321,5 @@ from flashcards import notetypes  # noqa: E402
 app.include_router(notetypes.router)
 from flashcards import editor  # noqa: E402
 app.include_router(editor.router)
+from flashcards import image_occlusion  # noqa: E402
+app.include_router(image_occlusion.router)

@@ -390,6 +390,9 @@ def add_page(request: Request, nt: int = 0, did: int = 0):
     with core.collection(user) as col:
         model = (col.models.get(nt) if nt else None) or col.models.current()
         did = did or col.get_config("curDeck", 1)
+        from flashcards.image_occlusion import is_io_notetype
+        if is_io_notetype(col, model):   # Anki's Add window switches to the mask editor for these
+            return RedirectResponse(f"/io/new?nt={model['id']}&did={did}", 303)
         draft = _drafts.pop(user, None)
         if draft and draft["ntid"] != model["id"]:
             draft = None
@@ -402,7 +405,8 @@ def add_page(request: Request, nt: int = 0, did: int = 0):
             tags = keep.get("tags", "")
         form = note_form(col, model, did, values, tags, confirm_cloze=bool(draft and draft.get("confirm")))
         body = (f'<div class="box"><div class="row" style="justify-content:space-between"><h2 style="margin:0">Add card</h2>'
-                f'<a class="btn" href="/notetypes/{model["id"]}/cards">Cards…</a></div>{form}</div>')
+                f'<div class="row"><a class="btn" href="/io/new?did={did}">Image Occlusion</a>'
+                f'<a class="btn" href="/notetypes/{model["id"]}/cards">Cards…</a></div></div>{form}</div>')
     return core.page("Add", body, user, "add", core.take_flash(request))
 
 
@@ -459,7 +463,7 @@ async def add(request: Request):
 
 
 @router.get("/edit/{nid}", response_class=HTMLResponse)
-def edit_page(request: Request, nid: int, back: str = "/browse"):
+def edit_page(request: Request, nid: int, back: str = "/browse", raw: int = 0):
     user = user_or_none(request)
     if not user: return core.need_login(request)
     back = core.safe_back(back)
@@ -471,6 +475,9 @@ def edit_page(request: Request, nid: int, back: str = "/browse"):
             core.set_flash(request, "!That note no longer exists.")
             return RedirectResponse(back, 303)
         model = note.note_type()
+        from flashcards.image_occlusion import is_io_notetype
+        if not raw and is_io_notetype(col, model):   # masks are edited in the image occlusion editor
+            return RedirectResponse(f"/io/{nid}?back={qback}", 303)
         cards = note.cards()
         did = cards[0].did if cards else 1
         form = note_form(col, model, did, dict(enumerate(note.fields)), " ".join(note.tags),
