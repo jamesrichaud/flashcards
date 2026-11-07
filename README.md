@@ -9,8 +9,10 @@ and .apkg import/export behave exactly like Anki. Made for iPad and Chromebook u
 - Study screen with Again / Hard / Good / Easy and Anki's real intervals, plus undo
 - Keyboard shortcuts: Space shows the answer, 1-4 answer the card
 - Add and edit cards: Basic, Basic (and reversed), Cloze, plus images and audio
-- Import .apkg decks (including shared decks from AnkiWeb, with their images and audio)
-- Export any deck as .apkg
+- Import .apkg decks (including shared decks from AnkiWeb, with their images and audio) with Anki's import options
+- Import text files (CSV/TSV/TXT) with separator, note type, deck, field mapping, tags and duplicate handling
+- Import a whole collection (.colpkg), replacing everything after a confirm and a backup
+- Export the collection (.colpkg), a deck or Browse search (.apkg), or notes/cards as plain text
 - Browse cards using Anki's search syntax (deck:, tag:, is:due, ...)
 - Deck options: new cards per day, reviews per day, desired retention
 - Stats: today, last 7 days, collection totals

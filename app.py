@@ -12,8 +12,7 @@ from fastapi import FastAPI, Form, Request, UploadFile, File
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, Response
 from starlette.middleware.sessions import SessionMiddleware
 
-from anki.collection import (Collection, ImportAnkiPackageRequest,
-                             ExportAnkiPackageOptions, DeckIdLimit)
+from anki.collection import Collection, ExportAnkiPackageOptions, DeckIdLimit
 from anki.scheduler.v3 import CardAnswer
 from anki.sound import SoundOrVideoTag
 from anki.browser import BrowserConfig
@@ -238,7 +237,7 @@ def deck_overview(request: Request, did: int):
  if conf else '')}
 </div>{opts}
 <div class="box row"><a class="btn" href="/browse?q=%22deck:{html.escape(deck['name'])}%22">Browse cards</a>
-<a class="btn" href="/deck/{did}/export">Export .apkg</a>
+<a class="btn" href="/export?did={did}">Export…</a>
 <form method="post" action="/deck/{did}/rename" class="row" style="flex:1">
 <input name="name" value="{html.escape(deck['name'])}" style="flex:1"><button>Rename</button></form>
 <form method="post" action="/deck/{did}/delete" onsubmit="return confirm('Delete this deck and all its cards?')">
@@ -1018,6 +1017,7 @@ placeholder="Search (Anki syntax: deck:French is:due tag:verb front:*cat*)"><but
 <span class="muted">{total} {unit}{(' · ' + html.escape(err)) if err else ''}</span>
 <div class="row"><div class="row seg" role="group" aria-label="Show">{seg}</div>
 <a class="btn" href="/filtered/new?search={quote(q)}" title="Create a filtered deck from this search">Filtered deck</a>
+<a class="btn" href="/export?q={quote(q)}" title="Export the notes in this search">Export</a>
 <details class="panel"><summary class="btn">Columns ▾</summary></details></div></div>
 <form id="colsform" method="post" action="/browse/columns" style="display:none;margin-top:10px">
 <input type="hidden" name="mode" value="{mode}"><input type="hidden" name="back" value="{html.escape(here)}">
@@ -1191,39 +1191,6 @@ async def browse_bulk(request: Request):
     set_flash(request, msg)
     return RedirectResponse(back, 303)
 
-# ---------- import ----------
-@app.get("/import", response_class=HTMLResponse)
-def import_page(request: Request):
-    user = current_user(request)
-    if not user: return need_login(request)
-    body = """<div class="box"><h2 style="margin-top:0">Import a deck</h2>
-<p>Choose an Anki deck file (<b>.apkg</b>), for example a shared deck from ankiweb.net/shared or one exported from Anki.</p>
-<form method="post" enctype="multipart/form-data"><input type="file" name="file" accept=".apkg,.zip" required>
-<p><button class="primary">Import</button></p></form>
-<p class="muted" style="font-size:14px">Large decks with lots of images can take a minute.</p></div>"""
-    return page("Import", body, user, "import", take_flash(request))
-
-@app.post("/import")
-async def do_import(request: Request, file: UploadFile = File(...)):
-    user = current_user(request)
-    if not user: return need_login(request)
-    if not (file.filename or "").lower().endswith((".apkg", ".zip")):
-        set_flash(request, "!Please choose an .apkg file.")
-        return RedirectResponse("/import", 303)
-    tmp = os.path.join(tempfile.mkdtemp(), "import.apkg")
-    with open(tmp, "wb") as fh:
-        while chunk := await file.read(1 << 20):
-            fh.write(chunk)
-    with collection(user) as col:
-        try:
-            before = col.note_count()
-            col.import_anki_package(ImportAnkiPackageRequest(package_path=tmp))
-            set_flash(request, f"Imported {col.note_count() - before} new notes from {file.filename}.")
-        except Exception as e:
-            set_flash(request, f"!Import failed: {e}")
-    os.remove(tmp)
-    return RedirectResponse("/", 303)
-
 # ---------- stats ----------
 @app.get("/stats", response_class=HTMLResponse)
 def stats(request: Request):
@@ -1323,3 +1290,5 @@ from flashcards import editor  # noqa: E402
 app.include_router(editor.router)
 from flashcards import image_occlusion  # noqa: E402
 app.include_router(image_occlusion.router)
+from flashcards import import_export  # noqa: E402
+app.include_router(import_export.router)
