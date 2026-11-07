@@ -13,6 +13,7 @@ Everything runs on Anki's own engine, so cards, scheduling and files stay compat
 - Type-in-the-answer cards with Anki's comparison, audio auto-play and replay, MathJax, leech notice
 - Card actions: suspend, bury card or note, flags, mark, reset to new, set due date, edit and come back to the same card, card info with full review history
 - Optional "tap the card to answer" for iPads (left half Again, right half Good)
+- Study reminders: a daily notification at your chosen time and days, only when cards are due (Web Push; needs the HTTPS link, and on iPad the Home Screen app)
 - Custom study (raise today's limits, forgotten cards, review ahead, preview new, by state or tag) and filtered decks
 - Deck options with presets: steps, intervals, limits, order, burying, leeches, ease, FSRS retention and Optimize
 - Undo and redo of everything, with a message saying what was undone
@@ -51,6 +52,12 @@ Studying itself needs the connection: answers are saved on the server straight a
 
 For iPads, Preferences has "Tap the card to answer": tap the card to show the answer, then tap its
 left half for Again or its right half for Good (the answer buttons still work).
+
+Study reminders (Settings > Study reminders) are Web Push notifications. They need the HTTPS link.
+On iPad (iPadOS 16.4 or later) open the app from the Home Screen first, then tap "Turn on
+notifications here"; Safari tabs can't get them. On a Chromebook, Chrome shows them while Chrome is
+running. The server keeps its push keys in `data/vapid_private.pem` and `data/vapid_public.txt`;
+if they are deleted, each device has to turn notifications on again.
 
 ## Using it on several devices
 Every iPad, Chromebook or computer that logs in as the same person uses the same cards on the

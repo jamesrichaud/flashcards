@@ -1,6 +1,6 @@
 FROM python:3.13-slim
 WORKDIR /app
-RUN pip install --no-cache-dir anki fastapi "uvicorn[standard]" python-multipart itsdangerous
+RUN pip install --no-cache-dir anki fastapi "uvicorn[standard]" python-multipart itsdangerous pywebpush tzdata
 COPY app.py .
 COPY flashcards ./flashcards
 COPY addons_examples ./addons_examples

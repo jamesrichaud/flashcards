@@ -1228,6 +1228,9 @@ def settings(request: Request):
 <div class="box row" style="justify-content:space-between"><div><h3 style="margin:0">Preferences</h3>
 <span class="muted">Next day starts at, learn ahead, timebox, review screen, theme.</span></div>
 <a class="btn" href="/preferences">Preferences</a></div>
+<div class="box row" style="justify-content:space-between"><div><h3 style="margin:0">Study reminders</h3>
+<span class="muted">A daily notification on your iPad or Chromebook when cards are due.</span></div>
+<a class="btn" href="/reminders">Reminders</a></div>
 <div class="box row" style="justify-content:space-between"><div><h3 style="margin:0">Add-ons</h3>
 <span class="muted">Small server add-ons for this app. Desktop Anki add-ons don't run here.</span></div>
 <a class="btn" href="/addons">Add-ons</a></div>
@@ -1324,3 +1327,6 @@ app.include_router(addons.router)
 app.mount("/addon", addons.Dispatcher())
 from flashcards import whiteboard  # noqa: E402  (study screen's drawing layer)
 app.include_router(whiteboard.router)
+from flashcards import reminders  # noqa: E402  (daily study reminders by Web Push; scheduler thread)
+app.include_router(reminders.router)
+app.router.on_startup.append(reminders.start)

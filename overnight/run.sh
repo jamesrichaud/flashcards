@@ -11,7 +11,7 @@ if [ ! -d .venv ]; then
   python3 -m venv .venv || { sudo apt-get install -y python3-venv && python3 -m venv .venv; }
 fi
 . .venv/bin/activate
-pip install -q anki fastapi "uvicorn[standard]" python-multipart itsdangerous httpx playwright pywebpush >> "$LOG" 2>&1
+pip install -q anki fastapi "uvicorn[standard]" python-multipart itsdangerous httpx playwright pywebpush tzdata >> "$LOG" 2>&1
 python -m playwright install chromium >> "$LOG" 2>&1 || true
 
 END=$(( $(date +%s) + ${HOURS:-9} * 3600 ))

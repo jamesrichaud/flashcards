@@ -152,6 +152,13 @@ self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(
 self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k)))).then(()=>self.clients.claim()));});
 self.addEventListener('fetch',e=>{if(e.request.mode!=='navigate')return;
  e.respondWith(fetch(e.request).catch(()=>caches.open(C).then(c=>c.match('/offline')).then(r=>r||Response.error())));});
+// Study reminders (flashcards/reminders.py): show the push, and open the app when it is tapped.
+self.addEventListener('push',e=>{let d={};try{d=e.data?e.data.json():{};}catch(x){d={body:e.data?e.data.text():''};}
+ e.waitUntil(self.registration.showNotification(d.title||'Flashcards',{body:d.body||'',tag:d.tag||'fc-reminder',
+  icon:'/icon-192.png',badge:'/icon-192.png',data:{url:d.url||'/'}}));});
+self.addEventListener('notificationclick',e=>{e.notification.close();const url=(e.notification.data&&e.notification.data.url)||'/';
+ e.waitUntil(clients.matchAll({type:'window',includeUncontrolled:true}).then(ws=>{for(const w of ws){if('focus' in w){w.navigate&&w.navigate(url).catch(()=>{});return w.focus();}}
+  return clients.openWindow(url);}));});
 """
 
 
