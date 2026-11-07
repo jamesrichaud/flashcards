@@ -239,6 +239,7 @@ def deck_overview(request: Request, did: int):
         targets = move_targets(col, did)
         from flashcards import addons   # late import: addons imports app
         addon_html = addons.html_hook("deck_overview", col, did)
+        offline_box = core.offline_mod.overview_box(col, did)
     opts = ""
     if conf:
         preset = t("Preset “{name}”: {new} new/day,\n{rev} reviews/day", name=html.escape(conf["name"]),
@@ -274,7 +275,7 @@ def deck_overview(request: Request, did: int):
 <span class="rev">{t("To review {n}", n=f"<b>{rev}</b>")}</span></div>
 <p class="muted">{in_deck}</p>
 {study}
-</div>{addon_html}{opts}
+</div>{addon_html}{opts}{core.offline_mod.SWITCH_CSS}{offline_box}
 <div class="box row"><a class="btn" href="/browse?q=%22deck:{html.escape(deck['name'])}%22">{t("Browse cards")}</a>
 <a class="btn" href="/export?did={did}">{t("Export…")}</a>
 <a class="btn" href="/stats?did={did}">{t("Stats")}</a>{desc_btn}</div>

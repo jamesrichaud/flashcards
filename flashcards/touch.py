@@ -163,7 +163,8 @@ SW_JS = """// Flashcards service worker: only shows a friendly page when the ser
 // Nothing else is cached, so every page is always fresh from the server.
 const C='fc-offline-v1';
 self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(['/offline','/icon-192.png'])).then(()=>self.skipWaiting()));});
-self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k)))).then(()=>self.clients.claim()));});
+// Only this worker's own old caches are deleted: the offline copies' media (fc-media:<user>) stays.
+self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k.startsWith('fc-offline-')&&k!==C).map(k=>caches.delete(k)))).then(()=>self.clients.claim()));});
 self.addEventListener('fetch',e=>{if(e.request.mode!=='navigate')return;
  e.respondWith(fetch(e.request).catch(()=>caches.open(C).then(c=>c.match('/offline')).then(r=>r||Response.error())));});
 // Study reminders (flashcards/reminders.py): show the push, and open the app when it is tapped.

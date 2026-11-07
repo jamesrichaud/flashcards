@@ -113,8 +113,9 @@ min-height:44px;cursor:pointer}}.opt input{{width:22px;height:22px;flex:none;mar
 <label>{eng(tr.preferences_theme)}</label>{theme_opts}
 <label for="lang">{eng(tr.preferences_language)}</label>{lang_select(user, request_scope)}
 </div>
+{core.offline_mod.SWITCH_CSS}{core.offline_mod.preferences_box(col)}
 <p><button class="primary">{e(t("Save"))}</button></p>
-</form>"""
+</form>{core.offline_mod.preferences_forms()}"""
 
 
 @router.get("/preferences", response_class=HTMLResponse)
@@ -158,6 +159,7 @@ async def preferences_save(request: Request):
         tap = form.get("tap_zones") == "1"
         if tap != core.touch_mod.tap_zones(col):
             col.set_config(core.touch_mod.TAP_KEY, tap)
+        core.offline_mod.save_from_preferences(col, form)
     if lang_changed:
         core.set_user_lang(user, lang)
         core.reopen_collection(user)   # the engine's own messages switch language too

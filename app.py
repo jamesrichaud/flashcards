@@ -193,7 +193,7 @@ def page(title, body, user=None, active="", flash=""):
 <meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Flashcards"><link rel="manifest" href="/manifest.json">
 {touch_mod.head_html(theme)}<title>{html.escape(title)}</title><style>{CSS}{touch_mod.CSS}</style></head><body>
-<header><b>Flashcards</b>{nav}</header><main>{fl}{body}</main>{undo_mod.SCRIPT + sync_mod.live_script(user) if user else ""}
+<header><b>Flashcards</b>{nav}</header><main>{fl}{body}</main>{undo_mod.SCRIPT + sync_mod.live_script(user) + offline_mod.script_tag(user) if user else ""}
 {touch_mod.BODY_SCRIPT}</body></html>""")
 
 def take_flash(request):
@@ -575,6 +575,15 @@ def js(value):
     """JSON for inline <script>: no '<' so card HTML or URL text can't close the script tag."""
     return json.dumps(value).replace("<", "\\u003c")
 
+def study_sides(col, card):
+    """A card's question and answer as the study screen shows them (add-on output, type-in box,
+    replay buttons), before card_doc(). Also used for offline copies (flashcards/offline.py)."""
+    qtext = card.question()
+    tinfo = type_answer_info(col, card, qtext)
+    question = render_side(col, card, type_question(tinfo, addons.card_render(col, card, "question", qtext)))
+    answer = render_side(col, card, type_answer(tinfo, addons.card_render(col, card, "answer", card.answer())))
+    return question, answer, tinfo
+
 def study_undo_label(col):
     label = col.undo_status().undo
     return label if any(k in (label or "").lower() for k in STUDY_UNDOABLE) else ""
@@ -648,10 +657,7 @@ def study(request: Request, did: int, cid: int = 0, shown: int = 0, ms: int = 0,
         qc = q.cards[0]
         card = col.get_card(qc.card.id)
         labels = [re.sub(r'[\u2068\u2069]', '', l) for l in i18n.describe_next_states(col, qc.states)]
-        qtext = card.question()
-        tinfo = type_answer_info(col, card, qtext)
-        question = render_side(col, card, type_question(tinfo, addons.card_render(col, card, "question", qtext)))
-        answer = render_side(col, card, type_answer(tinfo, addons.card_render(col, card, "answer", card.answer())))
+        question, answer, tinfo = study_sides(col, card)
         has_type = bool(tinfo and tinfo["expected"])
         counts = (q.new_count, q.learning_count, q.review_count)
         kind = {0: "new", 1: "lrn", 2: "rev", 3: "lrn"}.get(card.queue, "rev")
@@ -1463,3 +1469,5 @@ app.router.on_startup.append(reminders.start)
 from flashcards import find_dupes  # noqa: E402  (Browse > Find duplicates)
 app.include_router(find_dupes.router)
 from flashcards import latex as latex_mod  # noqa: E402  (LaTeX images: safe generation, source fallback)
+from flashcards import offline as offline_mod  # noqa: E402  (offline copies of decks; page() adds its script)
+app.include_router(offline_mod.router)
