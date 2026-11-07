@@ -23,6 +23,7 @@ Everything runs on Anki's own engine, so cards, scheduling and files stay compat
 - Image occlusion (rectangles and ellipses, hide all or hide one), compatible with desktop Anki
 - Note type manager: stock types, fields, card templates with live preview, change note type
 - Browse with Anki's search syntax: cards or notes, sortable columns, flags and suspended shown, bulk change deck, tags, suspend, delete, reset, reposition, find and replace
+- Browse sidebar like Anki's: saved searches, Today, flags, card states, deck tree, note types and card types, hierarchical tags (rename, delete, clear unused); a slide-out panel on iPad
 
 **Files, stats and upkeep**
 - Import .apkg (shared decks from AnkiWeb, with media), .colpkg (whole collection, after a confirm and a backup) and CSV/TSV/TXT with field mapping; export .colpkg, .apkg and plain text

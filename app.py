@@ -940,11 +940,17 @@ def note_state(col, cards):
     return text, next((c.user_flag() for c in cards if c.user_flag()), 0), cls
 
 @app.get("/browse", response_class=HTMLResponse)
-def browse(request: Request, q: str = "", page_no: int = 0, mode: str = "", sort: str = "", rev: str = ""):
+def browse(request: Request, q: str = "", page_no: int = 0, mode: str = "", sort: str = "", rev: str = "",
+           add: str = "", join: str = ""):
     user = current_user(request)
     if not user: return need_login(request)
     per = BROWSE_PER_PAGE
     with collection(user) as col:
+        if add:   # Ctrl/Shift-click in the sidebar: AND/OR the item onto the current search
+            try:
+                return RedirectResponse(browse_url(sidebar_mod.joined(col, q, add, join)), 303)
+            except Exception:
+                return RedirectResponse(browse_url(add), 303)
         mode = browse_mode(col, mode)
         notes = mode == "notes"
         cols = browse_columns(col, notes)
@@ -1008,6 +1014,7 @@ aria-label="Select"></td>{''.join(tds)}<td class="muted state">{flag_dot(flag)}{
             f'<label class="chk"><input type="checkbox" name="cols" value="{c.key}" {"checked" if c.key in cols else ""}>'
             f'{html.escape(c.notes_mode_label if notes else c.cards_mode_label)}</label>'
             for c in sorted(all_cols.values(), key=lambda c: (c.notes_mode_label if notes else c.cards_mode_label)))
+        side = sidebar_mod.sidebar_html(col, q)
     nav = ""
     if total > per:
         last = (total - 1) // per
@@ -1021,7 +1028,7 @@ aria-label="Select"></td>{''.join(tds)}<td class="muted state">{flag_dot(flag)}{
     flag_opts = "".join(f'<option value="{n}">{t}</option>' for n, t, _ in FLAGS)
     field_opts = "".join(f'<option value="{html.escape(f)}">{html.escape(f)}</option>' for f in fields)
     eq = html.escape(q)
-    body = f"""<style>main{{max-width:1240px}}{BROWSE_ROW_CSS}
+    body = f"""<style>{BROWSE_ROW_CSS}
 .info-link{{display:inline-flex;align-items:center;justify-content:center;min-width:44px;min-height:44px;font-size:20px;
 color:var(--muted);text-decoration:none;border-radius:10px}}.info-link:hover{{background:var(--bg)}}
 .btable td,.btable th{{padding:8px 8px;font-size:15px;vertical-align:middle}}.btable td.num,.btable th.num{{text-align:right;
@@ -1034,7 +1041,7 @@ a.sort{{color:var(--muted);text-decoration:none}}a.sort.on{{color:var(--ink);fon
 details.panel>summary{{cursor:pointer;list-style:none;display:inline-block}}details.panel>summary::-webkit-details-marker{{display:none}}
 .bar{{position:sticky;top:calc(65px + env(safe-area-inset-top));z-index:4}}.arg{{display:none}}.arg.show{{display:flex}}.bar select,.bar input[type=text],
 .bar input[type=number]{{width:auto;min-height:44px}}</style>
-<div class="box"><form class="row" action="/browse"><input name="q" value="{eq}" style="flex:1;min-width:220px"
+<div class="box"><form class="row" action="/browse">{sidebar_mod.OPEN_BUTTON}<input name="q" value="{eq}" style="flex:1;min-width:220px"
 placeholder="Search (Anki syntax: deck:French is:due tag:verb front:*cat*)"><button>Search</button></form>
 <div class="row" style="margin-top:10px;justify-content:space-between">
 <span class="muted">{total} {unit}{(' · ' + html.escape(err)) if err else ''}</span>
@@ -1095,7 +1102,7 @@ bulk.querySelectorAll('input[name=find],input[name=replace]').forEach(i=>i.addEv
  if(e.key==='Enter'){{e.preventDefault();bulk.querySelector('button[name=do_replace]').click();}}}}));
 const cp=document.querySelector('details.panel');cp.ontoggle=()=>document.getElementById('colsform').style.display=cp.open?'block':'none';
 </script>"""
-    return page("Browse", body, user, "browse", take_flash(request))
+    return page("Browse", sidebar_mod.layout(side, body), user, "browse", take_flash(request))
 
 def safe_back(back, default="/browse"):
     return back if back.startswith("/") and not back.startswith("//") else default
@@ -1322,6 +1329,8 @@ from flashcards import sync as sync_mod  # noqa: E402  (page() adds its live-ref
 app.include_router(sync_mod.router)
 from flashcards import touch as touch_mod  # noqa: E402  (page() adds its head tags; error pages)
 app.include_router(touch_mod.router)
+from flashcards import browser_sidebar as sidebar_mod  # noqa: E402  (browse() adds the sidebar)
+app.include_router(sidebar_mod.router)
 from flashcards import addons  # noqa: E402  (study screen calls its card_render/after_answer hooks)
 app.include_router(addons.router)
 app.mount("/addon", addons.Dispatcher())
