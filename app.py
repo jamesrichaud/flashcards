@@ -287,7 +287,7 @@ window.frameElement.dispatchEvent(new Event("fc-resize"))}catch(e){}})}}};</scri
 
 CARD_DARK_CSS = """body{background:#232325;color:#f2f2f2}.card{background:transparent!important;color:#f2f2f2!important}
 input#typeans{background:#161617;color:#f2f2f2;border-color:#555}.replay-button circle{fill:#333;stroke:#777}
-.replay-button path{fill:#ddd}"""
+.replay-button path{fill:#ddd}img.latex{filter:invert(100%)}"""
 # Like Anki, cards in dark mode get the night_mode / nightMode classes so card CSS can style them.
 NIGHT_JS = """<script>if(matchMedia('(prefers-color-scheme:dark)').matches){
 document.documentElement.classList.add('night_mode');document.documentElement.classList.add('nightMode');}</script>"""
@@ -312,6 +312,7 @@ img{{max-width:100%;height:auto}}.cloze{{font-weight:bold;color:#2f6fde}}
 code#typeans{{display:inline-block;width:auto;border:0;padding:0;font-family:inherit}}
 .typeGood{{background-color:#afa;color:black}}.typeBad{{background-color:#faa;color:black}}
 .typeMissed{{background-color:#ccc;color:black}}
+img.latex{{vertical-align:middle}}
 {dark}
 </style>{mj}</head><body class="card">{inner}</body></html>"""
 
@@ -1342,3 +1343,4 @@ app.include_router(reminders.router)
 app.router.on_startup.append(reminders.start)
 from flashcards import find_dupes  # noqa: E402  (Browse > Find duplicates)
 app.include_router(find_dupes.router)
+from flashcards import latex as latex_mod  # noqa: E402  (LaTeX images: safe generation, source fallback)

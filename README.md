@@ -20,6 +20,7 @@ Everything runs on Anki's own engine, so cards, scheduling and files stay compat
 
 **Cards and note types**
 - Rich editor for Add/Edit: formatting, colours, lists, cloze buttons and keys, pictures, audio recording, MathJax, sticky fields, duplicate warning, preview
+- LaTeX on cards ([latex], [$], [$$]) as images, like Anki: turn on "Generate LaTeX images" in Preferences; needs latex + dvipng on the server (in the Docker image), otherwise the LaTeX source is shown; Render LaTeX in Check Media
 - Image occlusion (rectangles and ellipses, hide all or hide one), compatible with desktop Anki
 - Note type manager: stock types, fields, card templates with live preview, change note type
 - Browse with Anki's search syntax: cards or notes, sortable columns, flags and suspended shown, bulk change deck, tags, suspend, delete, reset, reposition, find and replace

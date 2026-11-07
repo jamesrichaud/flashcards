@@ -10,7 +10,8 @@ to every device and to Anki itself after a sync:
   - Show next review time above answer buttons
 The theme (follow system / light / dark) is this app's own setting, kept in the collection's
 config under `flashcardsTheme`; so is "tap the card to answer" (`flashcardsTapZones`, see
-flashcards/touch.py). Labels come from the engine's translations.
+flashcards/touch.py). "Generate LaTeX images" is the engine's own setting (`Config.Bool.RENDER_LATEX`,
+see flashcards/latex.py). Labels come from the engine's translations.
 """
 import html, re
 
@@ -81,6 +82,13 @@ min-height:44px;cursor:pointer}}.opt input{{width:22px;height:22px;flex:none;mar
 {check("tap_zones", core.touch_mod.tap_zones(col), "Tap the card to answer",
        "Tap the card to show the answer, then tap its left half for Again or its right half for Good.")}
 </div>
+<div class="box"><h3>{t(tr.preferences_editing)}</h3>
+{check("render_latex", core.latex_mod.enabled(col), t(tr.preferences_generate_latex_images_automatically),
+       "Turns [latex], [$] and [$$] on cards into pictures, made on the server. LaTeX can run commands and "
+       "read files, so only turn this on if you trust the cards you study, as in Anki."
+       + ("" if core.latex_mod.installed() else " <b>LaTeX isn't installed on this server</b>, so cards show the "
+          "LaTeX source instead."))}
+</div>
 <div class="box"><h3>{t(tr.preferences_appearance)}</h3>
 <label>{t(tr.preferences_theme)}</label>{theme_opts}
 <label>{t(tr.preferences_language)}</label><div>English</div>
@@ -122,6 +130,9 @@ async def preferences_save(request: Request):
         col.set_preferences(p)
         if theme in core.THEMES and theme != core.theme_of(col):
             col.set_config(core.THEME_KEY, theme)
+        latex_on = form.get("render_latex") == "1"
+        if latex_on != core.latex_mod.enabled(col):
+            core.latex_mod.set_enabled(col, latex_on)
         tap = form.get("tap_zones") == "1"
         if tap != core.touch_mod.tap_zones(col):
             col.set_config(core.touch_mod.TAP_KEY, tap)
