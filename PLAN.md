@@ -4,7 +4,7 @@ Work top to bottom. One unchecked item per run. Tick `- [x]` when done and teste
 If an item fails twice, mark it `- [~]` with a one-line reason under it and move on.
 
 ## Core study features
-- [ ] Card actions in the study screen and browser: suspend/unsuspend, bury (card and note), flag (red/orange/green/blue/pink/turquoise/purple, keys Ctrl+1..7 on study screen), mark note (tag `marked`), reset to new, set due date. Show flag colour and suspended state in Browse. Keyboard: `-` bury, `@` suspend, `*` mark, as in Anki.
+- [x] Card actions in the study screen and browser: suspend/unsuspend, bury (card and note), flag (red/orange/green/blue/pink/turquoise/purple, keys Ctrl+1..7 on study screen), mark note (tag `marked`), reset to new, set due date. Show flag colour and suspended state in Browse. Keyboard: `-` bury, `@` suspend, `*` mark, as in Anki.
 - [ ] Card info page (`/card/{id}/info`): added date, first review, latest review, interval, due, reviews, lapses, ease or FSRS stability/difficulty/retrievability, average time, total time, deck, note type, full review history table. Link from study screen and browser.
 - [ ] Browse upgrade: switch between notes and cards mode, column for due date, interval, ease, reviews, lapses; sort by column; select many (checkboxes) and apply: change deck, add/remove tags, suspend, delete, reset, reposition new cards. Find and replace in fields.
 - [ ] Study screen parity: "Again" re-shows in the same session as in Anki; Edit returns to the same card; type-in-the-answer cards ({{type:Field}}) with an input box and Anki's comparison output; play/replay audio (R key); auto-play audio as Anki does; show "card is a leech" notice when Anki tags a leech.

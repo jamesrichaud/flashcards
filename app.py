@@ -6,6 +6,7 @@ Licence: AGPL-3.0 (because it builds on Anki).
 """
 import hashlib, html, json, os, re, secrets, tempfile, threading, time
 from contextlib import contextmanager
+from urllib.parse import quote
 
 from fastapi import FastAPI, Form, Request, UploadFile, File
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, Response
@@ -301,6 +302,85 @@ img{{max-width:100%;height:auto}}.cloze{{font-weight:bold;color:#2f6fde}}
 @media (prefers-color-scheme:dark){{body{{background:#232325;color:#f2f2f2}}.card{{background:transparent!important;color:#f2f2f2!important}}}}
 </style></head><body class="card">{inner}</body></html>"""
 
+# ---------- card actions (suspend, bury, flag, mark, reset, set due date) ----------
+FLAGS = [(0, "No flag", "transparent"), (1, "Red", "#e5484d"), (2, "Orange", "#f08c00"), (3, "Green", "#2f9e44"),
+         (4, "Blue", "#2f6fde"), (5, "Pink", "#e64980"), (6, "Turquoise", "#12b5b0"), (7, "Purple", "#8e44ec")]
+FLAG_COLOR = {n: c for n, _, c in FLAGS}
+FLAG_NAME = {n: t for n, t, _ in FLAGS}
+# Undo labels the engine gives these actions; the study screen offers undo for them.
+STUDY_UNDOABLE = ("answer", "suspend", "bury", "flag", "tag", "reset", "due date", "forget")
+
+def card_state(card):
+    if card.queue == -1: return "Suspended"
+    if card.queue in (-2, -3): return "Buried"
+    return {0: "New", 1: "Learning", 2: "Review", 3: "Learning"}.get(card.type if card.queue == 4 else card.queue, "")
+
+def card_action(col, card, action, arg=""):
+    """Run one Anki card action through the engine; returns a short message."""
+    cid, nid = card.id, card.nid
+    note_cids = [c for c in col.card_ids_of_note(nid)]
+    if action == "suspend":
+        col.sched.suspend_cards([cid]); return "Card suspended."
+    if action == "suspend_note":
+        col.sched.suspend_cards(note_cids); return "Note suspended."
+    if action == "unsuspend":
+        col.sched.unsuspend_cards([cid]); return "Card unsuspended."
+    if action == "bury":
+        col.sched.bury_cards([cid]); return "Card buried."
+    if action == "bury_note":
+        col.sched.bury_notes([nid]); return "Note buried."
+    if action == "unbury":
+        col.sched.unbury_cards([cid]); return "Card unburied."
+    if action == "flag":
+        flag = int(arg or 0)
+        if not 0 <= flag <= 7: raise ValueError("Unknown flag.")
+        if flag and card.user_flag() == flag:   # pressing the same flag again clears it, as in Anki
+            flag = 0
+        col.set_user_flag_for_cards(flag, [cid])
+        return f"Flag: {FLAG_NAME[flag]}." if flag else "Flag removed."
+    if action == "mark":
+        if col.get_note(nid).has_tag("marked"):
+            col.tags.bulk_remove([nid], "marked"); return "Note unmarked."
+        col.tags.bulk_add([nid], "marked"); return "Note marked."
+    if action == "reset":
+        col.sched.schedule_cards_as_new([cid], restore_position=True, reset_counts=False)
+        return "Card reset to new."
+    if action == "due":
+        days = (arg or "").strip().replace(" ", "")
+        if not re.fullmatch(r"\d+(-\d+)?!?", days):
+            raise ValueError("Due date: enter days like 0 (today), 1, 3-7, or 5! to also set the interval.")
+        col.sched.set_due_date([cid], days)
+        return "Due date set."
+    raise ValueError("Unknown action.")
+
+@app.post("/card/{cid}/action")
+async def card_action_route(request: Request, cid: int):
+    user = current_user(request)
+    if not user: return need_login(request)
+    form = await request.form()
+    action, arg = str(form.get("action", "")), str(form.get("arg", ""))
+    back = str(form.get("back", "/browse"))
+    if not back.startswith("/") or back.startswith("//"): back = "/browse"
+    ajax = request.headers.get("x-requested-with") == "fetch"
+    with collection(user) as col:
+        try:
+            card = col.get_card(cid)
+            msg, good = card_action(col, card, action, arg), True
+            card.load()
+            info = {"flag": card.user_flag(), "marked": col.get_note(card.nid).has_tag("marked"),
+                    "queue": card.queue, "state": card_state(card)}
+        except Exception as e:
+            msg, good, info = str(e) or "That did not work.", False, {}
+    if ajax:
+        return {"ok": good, "msg": msg, **info}
+    set_flash(request, msg if good else "!" + msg)
+    return RedirectResponse(back, 303)
+
+def flag_dot(flag, size=12):
+    if not flag: return ""
+    return (f'<span title="{FLAG_NAME[flag]} flag" style="display:inline-block;width:{size}px;height:{size}px;'
+            f'border-radius:50%;background:{FLAG_COLOR[flag]};vertical-align:middle"></span>')
+
 @app.get("/study/{did}", response_class=HTMLResponse)
 def study(request: Request, did: int):
     user = current_user(request)
@@ -319,8 +399,9 @@ def study(request: Request, did: int):
         counts = (q.new_count, q.learning_count, q.review_count)
         kind = {0: "new", 1: "lrn", 2: "rev", 3: "lrn"}.get(card.queue, "rev")
         undo_label = col.undo_status().undo
-        if "answer" not in (undo_label or "").lower():
+        if not any(k in (undo_label or "").lower() for k in STUDY_UNDOABLE):
             undo_label = ""
+        flag, marked = card.user_flag(), card.note().has_tag("marked")
     qdoc, adoc = json.dumps(card_doc(question)), json.dumps(card_doc(answer))
     names = ["Again", "Hard", "Good", "Easy"]
     colors = ["again", "hard", "good", "easy"]
@@ -329,16 +410,42 @@ onclick="answer({i + 1})"><small>{html.escape(labels[i])}</small><br>{n}</button
                    for i, (n, c) in enumerate(zip(names, colors)))
     undo = f'<form method="post" action="/study/{did}/undo"><button>Undo {html.escape(undo_label)}</button></form>' \
         if undo_label else ""
+    flag_btns = "".join(f"""<button type="button" class="fl" onclick="act('flag',{n})" title="Ctrl+{n}">
+<span class="dot" style="background:{c}"></span>{t}</button>""" for n, t, c in FLAGS[1:])
+    menu = f"""<details class="more"><summary class="btn">More ▾</summary><div class="menu">
+<button type="button" onclick="act('mark')">★ Mark note <kbd>*</kbd></button>
+<button type="button" onclick="act('bury')">Bury card <kbd>-</kbd></button>
+<button type="button" onclick="act('bury_note')">Bury note <kbd>=</kbd></button>
+<button type="button" onclick="act('suspend')">Suspend card <kbd>@</kbd></button>
+<button type="button" onclick="act('suspend_note')">Suspend note <kbd>!</kbd></button>
+<button type="button" onclick="setDue()">Set due date… <kbd>Ctrl+Shift+D</kbd></button>
+<button type="button" onclick="resetCard()">Reset to new… <kbd>Ctrl+Alt+N</kbd></button>
+<div class="flags">{flag_btns}</div></div></details>"""
     body = f"""<style>main{{max-width:900px}}#frame{{width:100%;min-height:55vh;border:1px solid var(--line);
 border-radius:14px;background:var(--card)}}.bar{{position:sticky;bottom:0;padding:12px 0;background:var(--bg)}}
 .ans{{flex:1;min-height:64px;font-weight:600}}.ans small{{font-weight:400;opacity:.8}}
-.counts span{{margin:0 6px;font-variant-numeric:tabular-nums}}.counts .cur{{text-decoration:underline}}</style>
+.counts span{{margin:0 6px;font-variant-numeric:tabular-nums}}.counts .cur{{text-decoration:underline}}
+.more{{position:relative}}.more summary{{list-style:none}}.more summary::-webkit-details-marker{{display:none}}
+.menu{{position:absolute;right:0;top:50px;z-index:10;background:var(--card);border:1px solid var(--line);border-radius:14px;
+padding:8px;width:280px;box-shadow:0 8px 30px rgba(0,0,0,.18);display:flex;flex-direction:column;gap:4px}}
+.menu button{{text-align:left;border:0;display:flex;justify-content:space-between;align-items:center}}
+.menu button:hover{{background:var(--bg)}}.menu kbd{{color:var(--muted);font:13px ui-monospace,monospace}}
+.flags{{display:grid;grid-template-columns:1fr 1fr;gap:2px;border-top:1px solid var(--line);padding-top:6px;margin-top:4px}}
+.flags button{{justify-content:flex-start;gap:8px;padding:9px 10px;font-size:15px}}
+.dot{{display:inline-block;width:12px;height:12px;border-radius:50%}}
+#flag{{width:14px;height:14px}}#mark{{color:#c98a16;font-size:20px}}
+#toast{{position:fixed;left:50%;bottom:110px;transform:translateX(-50%);background:var(--ink);color:var(--bg);
+padding:10px 18px;border-radius:10px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:20}}</style>
 <div class="row" style="justify-content:space-between;margin-bottom:10px">
 <a href="/deck/{did}" class="btn">← Deck</a>
-<div class="counts"><span class="new {'cur' if kind == 'new' else ''}">{counts[0]}</span>
+<div class="counts"><span id="flag" class="dot" title="{FLAG_NAME[flag]} flag"
+style="background:{FLAG_COLOR[flag]};{'' if flag else 'display:none'}"></span>
+<span id="mark" title="Marked" style="{'' if marked else 'display:none'}">★</span>
+<span class="new {'cur' if kind == 'new' else ''}">{counts[0]}</span>
 <span class="lrn {'cur' if kind == 'lrn' else ''}">{counts[1]}</span>
 <span class="rev {'cur' if kind == 'rev' else ''}">{counts[2]}</span></div>
-<div class="row">{undo}<a class="btn" href="/edit/{card.nid}?back=/study/{did}">Edit</a></div></div>
+<div class="row">{undo}<a class="btn" href="/edit/{card.nid}?back=/study/{did}">Edit</a>{menu}</div></div>
+<div id="toast"></div>
 <iframe id="frame" sandbox="allow-same-origin allow-scripts"></iframe>
 <form id="f" method="post" action="/study/{did}/answer"><input type="hidden" name="card_id" value="{card.id}">
 <input type="hidden" name="rating" id="rating"><input type="hidden" name="ms" id="ms"></form>
@@ -353,7 +460,27 @@ function show(){{if(shown)return;shown=true;load(A);document.getElementById('sho
  document.getElementById('btns').style.display='flex';}}
 function answer(r){{if(!shown)return;document.getElementById('rating').value=r;
  document.getElementById('ms').value=Date.now()-t0;document.getElementById('f').submit();}}
-function key(e){{if(e.key===' '||e.key==='Enter'){{e.preventDefault();shown?answer(3):show();}}
+const FC={json.dumps(FLAG_COLOR)};
+function toast(m){{const t=document.getElementById('toast');t.textContent=m;t.style.opacity=1;
+ clearTimeout(t._h);t._h=setTimeout(()=>t.style.opacity=0,1600);}}
+async function act(a,arg){{document.querySelector('.more').open=false;
+ const fd=new FormData();fd.append('action',a);fd.append('arg',arg??'');
+ const r=await(await fetch('/card/{card.id}/action',{{method:'POST',body:fd,headers:{{'X-Requested-With':'fetch'}}}})).json();
+ toast(r.msg);if(!r.ok)return;
+ if(['flag','mark'].includes(a)){{const f=document.getElementById('flag');f.style.display=r.flag?'':'none';
+  f.style.background=FC[r.flag];document.getElementById('mark').style.display=r.marked?'':'none';}}
+ else setTimeout(()=>location.replace('/study/{did}'),500);}}
+function setDue(){{const d=prompt('Show this card in how many days? (0 = today, 3-7 = random range, add ! to also set the interval)','1');
+ if(d!==null&&d.trim())act('due',d.trim());}}
+function resetCard(){{if(confirm('Reset this card to new? Its review history is kept.'))act('reset');}}
+function key(e){{if(e.ctrlKey&&!e.altKey&&/^Digit[1-7]$/.test(e.code)){{e.preventDefault();act('flag',+e.code.slice(5));return;}}
+ if(e.ctrlKey&&e.shiftKey&&e.code==='KeyD'){{e.preventDefault();setDue();return;}}
+ if(e.ctrlKey&&e.altKey&&e.code==='KeyN'){{e.preventDefault();resetCard();return;}}
+ if(e.ctrlKey||e.metaKey||e.altKey)return;
+ const k={{'-':'bury','=':'bury_note','@':'suspend','!':'suspend_note','*':'mark'}}[e.key];
+ if(k){{e.preventDefault();act(k);return;}}
+ if(e.key===' '||e.key==='Enter'){{if(e.target.tagName==='BUTTON'||e.target.tagName==='SUMMARY')return;
+  e.preventDefault();shown?answer(3):show();}}
  else if('1234'.includes(e.key)&&e.key.length===1)answer(+e.key);}}
 document.addEventListener('keydown',key);load(Q);
 </script>"""
@@ -380,7 +507,7 @@ def study_undo(request: Request, did: int):
     user = current_user(request)
     if not user: return need_login(request)
     with collection(user) as col:
-        if "answer" in (col.undo_status().undo or "").lower():
+        if any(k in (col.undo_status().undo or "").lower() for k in STUDY_UNDOABLE):
             col.undo()
     return RedirectResponse(f"/study/{did}", 303)
 
@@ -478,10 +605,50 @@ def edit_page(request: Request, nid: int, back: str = "/browse"):
         form = note_form(col, model, did, values, action=f"/edit/{nid}?back={back}",
                          extra=f'<a class="btn" href="{html.escape(back)}">Cancel</a>')
         form = form.replace('onchange="location=', 'disabled data-x="')
+        cards_box = cards_panel(col, note, f"/edit/{nid}?back={quote(back, safe='/')}")
     body = f"""<div class="box"><h2 style="margin-top:0">Edit note</h2>{form}
 <form method="post" action="/note/{nid}/delete?back={html.escape(back)}" onsubmit="return confirm('Delete this note and its cards?')">
-<button class="danger">Delete note</button></form></div>"""
-    return page("Edit", body, user, "browse")
+<button class="danger">Delete note</button></form></div>{cards_box}"""
+    return page("Edit", body, user, "browse", take_flash(request))
+
+def cards_panel(col, note, back):
+    """Per-card actions (as in Anki's browser): suspend, bury, flag, reset, set due date; plus mark note."""
+    marked = note.has_tag("marked")
+    eb = html.escape(back)
+    def btn(cid, action, label, cls="", arg="", confirm=""):
+        oc = f' onsubmit="return confirm(\'{confirm}\')"' if confirm else ""
+        return (f'<form method="post" action="/card/{cid}/action"{oc}><input type="hidden" name="action" value="{action}">'
+                f'<input type="hidden" name="arg" value="{arg}"><input type="hidden" name="back" value="{eb}">'
+                f'<button class="{cls}">{label}</button></form>')
+    rows = []
+    for card in note.cards():
+        tmpl = card.template()["name"]
+        flag = card.user_flag()
+        state = card_state(card)
+        due = ""
+        if card.queue == 2 or (card.queue in (-1, -2, -3) and card.type == 2):
+            days = card.due - col.sched.today
+            due = "due today" if days == 0 else (f"due in {days} d" if days > 0 else f"overdue {-days} d")
+        flag_opts = "".join(f'<option value="{n}" {"selected" if n == flag else ""}>{t}</option>' for n, t, _ in FLAGS)
+        susp = btn(card.id, "unsuspend", "Unsuspend") if card.queue == -1 else btn(card.id, "suspend", "Suspend")
+        bury = btn(card.id, "unbury", "Unbury") if card.queue in (-2, -3) else btn(card.id, "bury", "Bury")
+        rows.append(f"""<div class="cardrow" style="border-left:6px solid {FLAG_COLOR[flag] if flag else 'var(--line)'}">
+<div class="row" style="justify-content:space-between"><b>{html.escape(tmpl)}</b>
+<span class="muted" style="font-size:14px">{flag_dot(flag)} {state}{' · ' + due if due else ''}
+· <a href="/browse?q=cid:{card.id}" class="muted">{html.escape(col.decks.name(card.did))}</a></span></div>
+<div class="row" style="margin-top:8px">{susp}{bury}
+<form method="post" action="/card/{card.id}/action" class="row" style="gap:6px"><input type="hidden" name="action" value="flag">
+<input type="hidden" name="back" value="{eb}"><select name="arg" aria-label="Flag" style="width:auto"
+onchange="this.form.submit()">{flag_opts}</select></form>
+<form method="post" action="/card/{card.id}/action" class="row" style="gap:6px"><input type="hidden" name="action" value="due">
+<input type="hidden" name="back" value="{eb}"><input name="arg" placeholder="days, e.g. 1 or 3-7" style="width:150px"
+aria-label="Due in days" required><button>Set due</button></form>
+{btn(card.id, "reset", "Reset to new", "danger", confirm="Reset this card to new?")}</div></div>""")
+    first = note.cards()[0].id if note.cards() else 0
+    mark = btn(first, "mark", "★ Unmark note" if marked else "☆ Mark note") if first else ""
+    return f"""<style>.cardrow{{padding:12px 14px;border:1px solid var(--line);border-radius:12px;margin-top:10px}}</style>
+<div class="box"><div class="row" style="justify-content:space-between"><h3 style="margin:0">Cards</h3>{mark}</div>
+{''.join(rows)}</div>"""
 
 @app.post("/edit/{nid}")
 async def edit(request: Request, nid: int, back: str = "/browse"):
@@ -521,6 +688,10 @@ def strip_html(s):
     s = re.sub(r"\[sound:[^\]]+\]", "🔊", s)
     return html.unescape(re.sub(r"<[^>]+>", " ", s)).strip()
 
+# Row tints like Anki's browser: suspended = yellow, flagged = flag colour, marked = purple-ish.
+BROWSE_ROW_CSS = "tr.susp td{background:rgba(240,200,40,.16)}tr.marked td{background:rgba(142,68,236,.10)}" + "".join(
+    f"tr.flag{n} td{{background:{c}22}}" for n, _, c in FLAGS[1:])
+
 @app.get("/browse", response_class=HTMLResponse)
 def browse(request: Request, q: str = "", page_no: int = 0):
     user = current_user(request)
@@ -538,14 +709,22 @@ def browse(request: Request, q: str = "", page_no: int = 0):
             n = col.get_note(nid)
             cards = n.cards()
             deck = col.decks.name(cards[0].did) if cards else ""
-            due = ""
+            due, flag, cls = "", 0, ""
             if cards:
-                c = cards[0]
-                due = {0: "New", 1: "Learning", 2: "Review", 3: "Learning", -1: "Suspended"}.get(c.queue, "")
-            rows.append(f"""<tr><td><a class="deck" href="/edit/{nid}?back=/browse?q={html.escape(q)}">
+                states = [card_state(c) for c in cards]
+                nsusp = states.count("Suspended")
+                due = states[0]
+                if nsusp == len(cards): due, cls = "Suspended", "susp"
+                elif nsusp: due = f"{states[0] if states[0] != 'Suspended' else 'New'} · {nsusp} suspended"
+                flag = next((c.user_flag() for c in cards if c.user_flag()), 0)
+            marked = n.has_tag("marked")
+            if flag: cls += f" flag{flag}"
+            elif marked: cls += " marked"
+            rows.append(f"""<tr class="{cls.strip()}"><td><a class="deck" href="/edit/{nid}?back={quote('/browse?q=' + q, safe='/')}">
 {html.escape(strip_html(n.fields[0])[:90]) or '(empty)'}</a><span class="muted" style="font-size:14px">
 {html.escape(strip_html(n.fields[1])[:90]) if len(n.fields) > 1 else ''}</span></td>
-<td class="muted" style="font-size:14px">{html.escape(deck)}</td><td class="muted" style="font-size:14px">{due}</td></tr>""")
+<td class="muted" style="font-size:14px">{html.escape(deck)}</td><td class="muted state" style="font-size:14px;white-space:nowrap">
+{flag_dot(flag)}{' <span title="Marked" style="color:#c98a16">★</span>' if marked else ''} {due}</td></tr>""")
     nav = ""
     if total > per:
         last = (total - 1) // per
@@ -555,6 +734,7 @@ def browse(request: Request, q: str = "", page_no: int = 0):
     body = f"""<div class="box"><form class="row"><input name="q" value="{html.escape(q)}" style="flex:1"
 placeholder="Search (Anki syntax: deck:French is:due tag:verb front:*cat*)"><button>Search</button></form>
 <p class="muted" style="margin-bottom:0">{total} notes{(' · ' + html.escape(err)) if err else ''}</p></div>
+<style>{BROWSE_ROW_CSS}</style>
 <div class="box"><table><tr><th>Note</th><th>Deck</th><th>State</th></tr>{''.join(rows)}</table></div>{nav}"""
     return page("Browse", body, user, "browse", take_flash(request))
 
