@@ -19,6 +19,7 @@ from anki.consts import MODEL_CLOZE
 from anki.notes import NoteFieldsCheckResult as Check
 
 import app as core
+from flashcards.i18n import t, tn
 from flashcards import addons  # card_render hook for previews
 
 router = APIRouter()
@@ -213,18 +214,18 @@ function cloze(same){if(!C.cloze){say(C.msgs.notCloze,true);return;}let hi=0;
 function insertMedia(snip){const t=target();if(t.mode==='ta'){taInsert(t.fd.ta,snip,'');return;}
  if(snip.startsWith('['))document.execCommand('insertText',false,snip);else document.execCommand('insertHTML',false,toDisplay(snip));}
 async function upload(file,pasted){const b=new FormData();b.append('file',file,file.name||'pasted');if(pasted)b.append('pasted','1');
- say('Uploading '+(file.name||'image')+'…');
+ say(C.msgs.uploading.replace('{name}',file.name||C.msgs.image));
  try{const r=await fetch('/media/upload',{method:'POST',body:b});const j=await r.json();
-  if(!r.ok){say(j.error||'Upload failed.',true);return;}insertMedia(j.html);say('');}
- catch(e){say('Upload failed: '+e.message,true);}}
+  if(!r.ok){say(j.error||C.msgs.uploadFailed,true);return;}insertMedia(j.html);say('');}
+ catch(e){say(C.msgs.uploadError.replace('{error}',e.message),true);}}
 // ---- toolbar ----
 const att=document.getElementById('ed-file');
 att.addEventListener('change',()=>{[...att.files].forEach(f=>upload(f,false));att.value='';});
 let rec=null,chunks=[];
 async function record(btn){if(rec){rec.stop();return;}
  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia||!window.MediaRecorder){
-  say(window.isSecureContext?'This browser cannot record audio.':'Recording needs a secure connection (https, or localhost).',true);return;}
- let stream;try{stream=await navigator.mediaDevices.getUserMedia({audio:true});}catch(e){say('Microphone not available: '+e.message,true);return;}
+  say(window.isSecureContext?C.msgs.noRecord:C.msgs.needSecure,true);return;}
+ let stream;try{stream=await navigator.mediaDevices.getUserMedia({audio:true});}catch(e){say(C.msgs.noMic.replace('{error}',e.message),true);return;}
  chunks=[];rec=new MediaRecorder(stream);const tgt=last;
  rec.ondataavailable=e=>{if(e.data&&e.data.size)chunks.push(e.data);};
  rec.onstop=()=>{stream.getTracks().forEach(t=>t.stop());const type=(rec.mimeType||'audio/webm').split(';')[0];rec=null;
@@ -233,7 +234,7 @@ async function record(btn){if(rec){rec.stop();return;}
   const d=new Date(),p=x=>String(x).padStart(2,'0');
   const name=`rec-${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}.${ext}`;
   last=tgt;upload(new File(chunks,name,{type}),false);};
- rec.start();btn.classList.add('recording');btn.textContent='■ Stop';say('Recording… press Stop when done.');}
+ rec.start();btn.classList.add('recording');btn.textContent='■ '+C.msgs.stop;say(C.msgs.recording);}
 F.querySelectorAll('.tb button').forEach(b=>{b.addEventListener('mousedown',e=>e.preventDefault());
  b.addEventListener('click',e=>{e.preventDefault();const a=b.dataset.act,c=b.dataset.cmd;
   if(c){const inp=b.dataset.color&&document.getElementById(b.dataset.color);cmd(c,inp?inp.value:null);}
@@ -256,7 +257,7 @@ document.addEventListener('keydown',e=>{const inField=flds.some(f=>f.contains(e.
  if(mod&&e.shiftKey&&e.code==='KeyC'){e.preventDefault();cloze(e.altKey);}
  else if(mod&&e.shiftKey&&e.code==='KeyX'){e.preventDefault();toggleHtml(last?last.fd:flds[0]);}
  else if(mod&&e.shiftKey&&e.code==='KeyP'){e.preventDefault();togglePreview();}
- else if(mod&&!e.shiftKey&&e.code==='KeyM'){e.preventDefault();chord=Date.now();say('MathJax: press M for inline, E for block.');}
+ else if(mod&&!e.shiftKey&&e.code==='KeyM'){e.preventDefault();chord=Date.now();say(C.msgs.mathjax);}
  else if(mod&&e.code==='KeyR'){e.preventDefault();cmd('removeFormat');}
  else if(mod&&e.code==='Equal'){e.preventDefault();cmd(e.shiftKey?'superscript':'subscript');}
  else if(mod&&!e.shiftKey&&e.target.tagName==='TEXTAREA'&&['KeyB','KeyI','KeyU'].includes(e.code)){e.preventDefault();
@@ -269,7 +270,7 @@ const dupBox=document.getElementById('ed-dupe');
 async function check(){try{const r=await fetch('/note/check',{method:'POST',body:new FormData(F)});if(!r.ok)return;
  const j=await r.json();flds[0].classList.toggle('dupe',j.state==='duplicate');
  if(j.state==='duplicate'){dupBox.className='dupnote';dupBox.innerHTML='';const a=document.createElement('a');
-  a.href=j.dupes;a.target='_blank';a.textContent=j.msg;dupBox.append('This note is a duplicate. ',a);}
+  a.href=j.dupes;a.target='_blank';a.textContent=j.msg;dupBox.append(C.msgs.duplicate+' ',a);}
  else if(j.state==='notetype_not_cloze'||j.state==='field_not_cloze'){dupBox.className='warnnote';dupBox.textContent=j.msg;}
  else{dupBox.className='';dupBox.textContent='';}}catch(e){}}
 if(flds.some(f=>f.ta.value))check();
@@ -315,18 +316,18 @@ def toolbar(col):
         attrs = "".join(f' data-{k.replace("_", "-")}="{html.escape(v)}"' for k, v in data.items())
         return f'<button type="button" title="{html.escape(title)}" aria-label="{html.escape(title)}"{attrs}>{label}</button>'
     sep = '<span class="sep"></span>'
-    return f"""<div class="tb" role="toolbar" aria-label="Formatting">
+    return f"""<div class="tb" role="toolbar" aria-label="{html.escape(t('Formatting'))}">
 {b('<b>B</b>', tr.editing_bold_text() + ' (Ctrl+B)', cmd='bold')}{b('<i>I</i>', tr.editing_italic_text() + ' (Ctrl+I)', cmd='italic')}
 {b('<u>U</u>', tr.editing_underline_text() + ' (Ctrl+U)', cmd='underline')}
 {b('x<sub>2</sub>', tr.editing_subscript() + ' (Ctrl+=)', cmd='subscript')}{b('x<sup>2</sup>', tr.editing_superscript() + ' (Ctrl+Shift+=)', cmd='superscript')}{sep}
-<span class="sw">{b('<span style="border-bottom:3px solid #d64545;padding:0 2px">A</span>', tr.editing_text_color() + ' (F7)', cmd='foreColor', color='ed-fg')}<input type="color" id="ed-fg" value="#d64545" aria-label="Choose {html.escape(tr.editing_text_color())}"></span>
-<span class="sw">{b('<span style="border-bottom:3px solid #ffd43b;padding:0 2px">▤</span>', tr.editing_text_highlight_color(), cmd='hiliteColor', color='ed-hl')}<input type="color" id="ed-hl" value="#ffd43b" aria-label="Choose {html.escape(tr.editing_text_highlight_color())}"></span>
+<span class="sw">{b('<span style="border-bottom:3px solid #d64545;padding:0 2px">A</span>', tr.editing_text_color() + ' (F7)', cmd='foreColor', color='ed-fg')}<input type="color" id="ed-fg" value="#d64545" aria-label="{html.escape(t('Choose {color}', color=tr.editing_text_color()))}"></span>
+<span class="sw">{b('<span style="border-bottom:3px solid #ffd43b;padding:0 2px">▤</span>', tr.editing_text_highlight_color(), cmd='hiliteColor', color='ed-hl')}<input type="color" id="ed-hl" value="#ffd43b" aria-label="{html.escape(t('Choose {color}', color=tr.editing_text_highlight_color()))}"></span>
 {b('•≡', tr.editing_unordered_list(), cmd='insertUnorderedList')}{b('1≡', tr.editing_ordered_list(), cmd='insertOrderedList')}
 {b('T<sub>×</sub>', tr.editing_remove_formatting() + ' (Ctrl+R)', cmd='removeFormat')}{sep}
 {b('[…]', tr.editing_cloze_deletion() + ' (Ctrl+Shift+C)', act='cloze')}{b('[…]=', tr.editing_cloze_deletion_repeat() + ' (Ctrl+Shift+Alt+C)', act='cloze-same')}
 {b('∑', tr.editing_mathjax_inline() + ' (Ctrl+M, M)', act='mj-inline')}{b('∑∑', tr.editing_mathjax_block() + ' (Ctrl+M, E)', act='mj-block')}{sep}
 {b('📎', tr.editing_attach_picturesaudiovideo() + ' (F3)', act='attach')}{b('🎤', tr.editing_record_audio(), act='record')}
-{b('Preview', 'Preview (Ctrl+Shift+P)', act='preview')}
+{b(html.escape(t('Preview')), t('Preview') + ' (Ctrl+Shift+P)', act='preview')}
 <input type="file" id="ed-file" accept="image/*,audio/*,video/*" multiple hidden></div>
 <p id="ed-msg" role="status" aria-live="polite"></p>"""
 
@@ -356,30 +357,44 @@ placeholder="{html.escape(f.get('description') or '')}">{html.escape(values.get(
 {'<div id="ed-dupe" role="status" aria-live="polite"></div>' if i == 0 else ''}</div>""")
     hint = ""
     if nt["type"] == MODEL_CLOZE:
-        hint = ('<p class="muted" style="font-size:14px">Cloze: select text and press [&hellip;] (Ctrl+Shift+C) for a new '
-                'card, [&hellip;]= (Ctrl+Shift+Alt+C) to add to the same card. Or type {{c1::answer}}.</p>')
+        # The buttons' markup goes in after escaping the sentence.
+        text = html.escape(t("Cloze: select text and press {new} (Ctrl+Shift+C) for a new card, {same} "
+                             "(Ctrl+Shift+Alt+C) to add to the same card. Or type {example}.",
+                             new="\x00", same="\x01", example="\x02"))
+        text = text.replace("\x00", "[&hellip;]").replace("\x01", "[&hellip;]=").replace("\x02", "{{c1::answer}}")
+        hint = '<p class="muted" style="font-size:14px">' + text + '</p>'
     confirm = ""
     if confirm_cloze:
         confirm = (f'<div class="confirmbox"><p style="margin-top:0">{html.escape(col.tr.adding_you_have_a_cloze_deletion_note())}</p>'
-                   f'<button class="primary" name="confirm_cloze" value="1">Add anyway</button></div>')
+                   f'<button class="primary" name="confirm_cloze" value="1">{html.escape(t("Add anyway"))}</button></div>')
     conf = {"ntid": nt["id"], "nid": nid, "adding": adding, "cloze": nt["type"] == MODEL_CLOZE,
-            "msgs": {"notCloze": col.tr.adding_cloze_outside_cloze_notetype()}}
+            "msgs": {"notCloze": col.tr.adding_cloze_outside_cloze_notetype(),
+                     "uploading": t("Uploading {name}…"), "image": t("image"),
+                     "uploadFailed": t("Upload failed."), "uploadError": t("Upload failed: {error}"),
+                     "noRecord": t("This browser cannot record audio."),
+                     "needSecure": t("Recording needs a secure connection (https, or localhost)."),
+                     "noMic": t("Microphone not available: {error}"), "stop": t("Stop"),
+                     "recording": t("Recording… press Stop when done."),
+                     "mathjax": t("MathJax: press M for inline, E for block."),
+                     "duplicate": t("This note is a duplicate.")}}
     type_sel = (f'<select name="ntid">{nt_opts}</select>' if adding else
-                f'<select disabled aria-label="Note type">{nt_opts}</select><input type="hidden" name="ntid" value="{nt["id"]}">')
-    save_title = html.escape(col.tr.adding_add_shortcut_ctrlandenter()) if adding else "Save (Ctrl+Enter)"
+                f'<select disabled aria-label="{html.escape(t("Note type"))}">{nt_opts}</select>'
+                f'<input type="hidden" name="ntid" value="{nt["id"]}">')
+    save_title = (html.escape(col.tr.adding_add_shortcut_ctrlandenter()) if adding
+                  else html.escape(t("Save") + " (Ctrl+Enter)"))
     return f"""{EDITOR_CSS}<form id="noteform" method="post" action="{action}" enctype="multipart/form-data">
 <input type="hidden" name="nid" value="{nid}">
-<div class="row"><div style="flex:1"><label>Type</label>{type_sel}</div>
-<div style="flex:1"><label>Deck</label><select name="did">{deck_opts}</select></div></div>
+<div class="row"><div style="flex:1"><label>{html.escape(t("Type"))}</label>{type_sel}</div>
+<div style="flex:1"><label>{html.escape(t("Deck"))}</label><select name="did">{deck_opts}</select></div></div>
 {toolbar(col)}{''.join(fields)}{hint}{confirm}
-<label for="tags">Tags (space separated)</label><input id="tags" name="tags" value="{html.escape(tags)}" autocapitalize="off">
-<noscript><label>Image or audio (optional, added to the end of the first field)</label>
+<label for="tags">{html.escape(t("Tags (space separated)"))}</label><input id="tags" name="tags" value="{html.escape(tags)}" autocapitalize="off">
+<noscript><label>{html.escape(t("Image or audio (optional, added to the end of the first field)"))}</label>
 <input type="file" name="upload" accept="image/*,audio/*"></noscript>
-<p class="row">{extra}<button class="primary" title="{save_title}">{'Add' if adding else 'Save'}</button></p></form>
-<div id="ed-preview" class="box" hidden><div class="row" style="justify-content:space-between"><b>Preview</b>
-<button type="button" id="pvclose">Close</button></div><div class="pvtabs"></div>
-<label>Front</label><iframe id="pvq" title="Front preview"></iframe>
-<label>Back</label><iframe id="pva" title="Back preview"></iframe></div>
+<p class="row">{extra}<button class="primary" title="{save_title}">{html.escape(t("Add") if adding else t("Save"))}</button></p></form>
+<div id="ed-preview" class="box" hidden><div class="row" style="justify-content:space-between"><b>{html.escape(t("Preview"))}</b>
+<button type="button" id="pvclose">{html.escape(t("Close"))}</button></div><div class="pvtabs"></div>
+<label>{html.escape(t("Front"))}</label><iframe id="pvq" title="{html.escape(t("Front preview"))}"></iframe>
+<label>{html.escape(t("Back"))}</label><iframe id="pva" title="{html.escape(t("Back preview"))}"></iframe></div>
 <script type="application/json" id="ed-conf">{core.js(conf)}</script>{EDITOR_JS}"""
 
 
@@ -405,10 +420,10 @@ def add_page(request: Request, nt: int = 0, did: int = 0):
                       if i < len(model["flds"]) and model["flds"][i].get("sticky")}
             tags = keep.get("tags", "")
         form = note_form(col, model, did, values, tags, confirm_cloze=bool(draft and draft.get("confirm")))
-        body = (f'<div class="box"><div class="row" style="justify-content:space-between"><h2 style="margin:0">Add card</h2>'
-                f'<div class="row"><a class="btn" href="/io/new?did={did}">Image Occlusion</a>'
-                f'<a class="btn" href="/notetypes/{model["id"]}/cards">Cards…</a></div></div>{form}</div>')
-    return core.page("Add", body + '<span data-noundokey hidden></span>', user, "add", core.take_flash(request))
+        body = (f'<div class="box"><div class="row" style="justify-content:space-between"><h2 style="margin:0">{html.escape(t("Add card"))}</h2>'
+                f'<div class="row"><a class="btn" href="/io/new?did={did}">{html.escape(t("Image Occlusion"))}</a>'
+                f'<a class="btn" href="/notetypes/{model["id"]}/cards">{html.escape(t("Cards…"))}</a></div></div>{form}</div>')
+    return core.page(t("Add"), body + '<span data-noundokey hidden></span>', user, "add", core.take_flash(request))
 
 
 async def save_upload(col, upload):
@@ -453,13 +468,13 @@ async def add(request: Request):
         if problem:
             _drafts[user] = {"ntid": model["id"], "did": did, "tags": tags, "confirm": confirm,
                              "fields": {i: v for i, v in enumerate(note.fields)}}
-            core.set_flash(request, f"!Could not add: {problem}")
+            core.set_flash(request, "!" + t("Could not add: {problem}", problem=problem))
         else:
             col.models.set_current(model)
             col.set_config("curDeck", did)
             _sticky[(user, model["id"])] = {
                 "tags": tags, "fields": {i: note.fields[i] for i, f in enumerate(model["flds"]) if f.get("sticky")}}
-            core.set_flash(request, f"Added {len(note.cards())} card(s).")
+            core.set_flash(request, tn("Added {n} card(s).", "Added {n} card(s).", len(note.cards())))
     return RedirectResponse(f"/add?nt={model['id']}&did={did}", 303)
 
 
@@ -473,7 +488,7 @@ def edit_page(request: Request, nid: int, back: str = "/browse", raw: int = 0):
         try:
             note = col.get_note(nid)
         except Exception:
-            core.set_flash(request, "!That note no longer exists.")
+            core.set_flash(request, "!" + t("That note no longer exists."))
             return RedirectResponse(back, 303)
         model = note.note_type()
         from flashcards.image_occlusion import is_io_notetype
@@ -483,15 +498,15 @@ def edit_page(request: Request, nid: int, back: str = "/browse", raw: int = 0):
         did = cards[0].did if cards else 1
         form = note_form(col, model, did, dict(enumerate(note.fields)), " ".join(note.tags),
                          action=html.escape(f"/edit/{nid}?back={qback}"), adding=False, nid=nid,
-                         extra=f'<a class="btn" href="{html.escape(back)}">Cancel</a>')
+                         extra=f'<a class="btn" href="{html.escape(back)}">{html.escape(t("Cancel"))}</a>')
         cards_box = core.cards_panel(col, note, f"/edit/{nid}?back={qback}")
-    body = f"""<div class="box"><h2 style="margin-top:0">Edit note</h2>{form}
-<form method="post" action="/note/{nid}/delete?back={html.escape(qback)}" onsubmit="return confirm('Delete this note and its cards?')">
-<button class="danger">Delete note</button></form>
-<p class="row" style="margin-bottom:0"><a class="btn" href="/notetypes/{model['id']}/cards?nid={nid}">Cards…</a>
-<a class="btn" href="/notetypes/{model['id']}/fields">Fields…</a>
-<a class="btn" href="/notetypes/change?nids={nid}&amp;back={html.escape(qback)}">Change note type</a></p></div>{cards_box}"""
-    return core.page("Edit", body + '<span data-noundokey hidden></span>', user, "browse", core.take_flash(request))
+    body = f"""<div class="box"><h2 style="margin-top:0">{html.escape(t("Edit note"))}</h2>{form}
+<form method="post" action="/note/{nid}/delete?back={html.escape(qback)}" onsubmit="return confirm({html.escape(core.js(t('Delete this note and its cards?')))})">
+<button class="danger">{html.escape(t("Delete note"))}</button></form>
+<p class="row" style="margin-bottom:0"><a class="btn" href="/notetypes/{model['id']}/cards?nid={nid}">{html.escape(t("Cards…"))}</a>
+<a class="btn" href="/notetypes/{model['id']}/fields">{html.escape(t("Fields…"))}</a>
+<a class="btn" href="/notetypes/change?nids={nid}&amp;back={html.escape(qback)}">{html.escape(t("Change note type"))}</a></p></div>{cards_box}"""
+    return core.page(t("Edit"), body + '<span data-noundokey hidden></span>', user, "browse", core.take_flash(request))
 
 
 @router.post("/edit/{nid}")
@@ -512,7 +527,7 @@ async def edit(request: Request, nid: int, back: str = "/browse"):
         new_did = int(form.get("did", 0) or 0)
         if new_did:
             col.set_deck([c.id for c in note.cards()], new_did)
-    core.set_flash(request, "Saved.")
+    core.set_flash(request, t("Saved."))
     return RedirectResponse(back, 303)
 
 
@@ -521,16 +536,16 @@ async def media_upload(request: Request):
     """A file pasted, dropped, attached or recorded in the editor. Returns the field HTML for it:
     <img> for pictures, [sound:] for audio and video, as Anki's editor does."""
     user = user_or_none(request)
-    if not user: return JSONResponse({"error": "Please log in again."}, 401)
+    if not user: return JSONResponse({"error": t("Please log in again.")}, 401)
     form = await request.form()
     up = form.get("file")
     if up is None or not hasattr(up, "read"):
-        return JSONResponse({"error": "No file was sent."}, 400)
+        return JSONResponse({"error": t("No file was sent.")}, 400)
     data = await up.read()
     if not data:
-        return JSONResponse({"error": "The file is empty."}, 400)
+        return JSONResponse({"error": t("The file is empty.")}, 400)
     if len(data) > MAX_UPLOAD:
-        return JSONResponse({"error": "The file is larger than 100 MB."}, 413)
+        return JSONResponse({"error": t("The file is larger than 100 MB.")}, 413)
     ctype = (up.content_type or "").split(";")[0].lower()
     fname = os.path.basename(up.filename or "").strip() or "file"
     ext = os.path.splitext(fname)[1].lower()
@@ -542,7 +557,7 @@ async def media_upload(request: Request):
     elif ctype.startswith(("audio/", "video/")) or ext in AV_EXTS:
         kind = "av"
     else:
-        return JSONResponse({"error": "Only pictures, audio and video can be added."}, 415)
+        return JSONResponse({"error": t("Only pictures, audio and video can be added.")}, 415)
     if form.get("pasted") == "1":   # Anki names pasted pictures after their checksum
         fname = f"paste-{hashlib.sha1(data).hexdigest()}{ext or '.png'}"
     with core.collection(user) as col:
@@ -560,14 +575,15 @@ async def check_route(request: Request):
         try:
             note = form_note(col, form)
         except Exception:
-            return JSONResponse({"error": "Unknown note or note type."}, 404)
+            return JSONResponse({"error": t("Unknown note or note type.")}, 404)
         return note_check(col, note)
 
 
 def preview_doc(col, card, text, kind="question"):
     text = core.render_side(col, card, addons.card_render(col, card, kind, text))
-    text = core.TYPE_PAT.sub(lambda m: '<center><input type="text" id="typeans" placeholder="(typing the answer)" '
-                                       'disabled></center>', text)
+    box = ('<center><input type="text" id="typeans" placeholder="'
+           + html.escape(t("(typing the answer)")) + '" disabled></center>')
+    text = core.TYPE_PAT.sub(lambda m: box, text)
     return core.card_doc(text, core.theme_of(col))
 
 
@@ -581,14 +597,14 @@ async def preview_route(request: Request):
         try:
             note = form_note(col, form)
         except Exception:
-            return JSONResponse({"error": "Unknown note or note type."}, 404)
+            return JSONResponse({"error": t("Unknown note or note type.")}, 404)
         nt = note.note_type()
         if nt["type"] == MODEL_CLOZE:
             ords = sorted(n - 1 for n in note.cloze_numbers_in_fields()) or [0]
-            names = [f"Cloze {o + 1}" for o in ords]
+            names = [t("Cloze {n}", n=o + 1) for o in ords]
         else:
             ords = list(range(len(nt["tmpls"])))
-            names = [t["name"] for t in nt["tmpls"]]
+            names = [tm["name"] for tm in nt["tmpls"]]
         cards = []
         for o, name in zip(ords, names):
             card = note.ephemeral_card(o)
@@ -618,7 +634,7 @@ async def sticky_route(request: Request):
         except (TypeError, ValueError):
             fld = None
         if not fld:
-            return JSONResponse({"error": "Unknown field."}, 404)
+            return JSONResponse({"error": t("Unknown field.")}, 404)
         fld["sticky"] = not fld.get("sticky", False)
         col.models.update_dict(nt)
         if not fld["sticky"]:

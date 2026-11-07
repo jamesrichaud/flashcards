@@ -18,6 +18,7 @@ from fastapi.responses import RedirectResponse
 from anki.errors import UndoEmpty
 
 import app as core
+from flashcards.i18n import t
 
 router = APIRouter()
 
@@ -43,15 +44,19 @@ def header_buttons(user):
     for kind, label, icon, keys in (("undo", undo, "↶", "Ctrl+Z"), ("redo", redo, "↷", "Ctrl+Shift+Z")):
         if not label:
             continue
-        title = html.escape(f"{kind.title()} {label} ({keys})")
+        if kind == "undo":
+            title = html.escape(t("Undo {action} ({keys})", action=label, keys=keys))
+        else:
+            title = html.escape(t("Redo {action} ({keys})", action=label, keys=keys))
         out.append(f'<form method="post" action="/{kind}" class="fc-ur"><input type="hidden" name="back" value="">'
                    f'<button title="{title}" aria-label="{title}" data-label="{html.escape(label)}">{icon}</button></form>')
     return "".join(out)
 
 # Shared by every page (added by core.page). Pages that use Ctrl+Z themselves mark the page
 # with an element carrying data-noundokey, or call preventDefault before this runs.
-SCRIPT = """<div id="fc-toast" role="status" aria-live="polite"></div><script>
+SCRIPT_TEMPLATE = """<div id="fc-toast" role="status" aria-live="polite"></div><script>
 (function(){
+const FAILED=%FAILED%;
 const T=document.getElementById('fc-toast');
 function toast(m){T.textContent=m;T.classList.add('on');clearTimeout(T._h);T._h=setTimeout(()=>T.classList.remove('on'),2200);}
 window.fcToast=toast;
@@ -66,7 +71,7 @@ async function run(kind){if(busy)return;busy=true;
   const url=window.FC_AFTER_UNDO||(location.pathname+location.search);let ok=true;
   try{ok=(await fetch(url,{headers:{'X-Requested-With':'fc-check'}})).ok;}catch(e){}
   location.replace(ok?url:'/');
- }catch(e){busy=false;toast('That did not work.');}}
+ }catch(e){busy=false;toast(FAILED);}}
 window.fcUndo=()=>run('undo');window.fcRedo=()=>run('redo');
 document.querySelectorAll('form.fc-ur').forEach(f=>f.addEventListener('submit',e=>{e.preventDefault();
  run(f.getAttribute('action').slice(1));}));
@@ -79,6 +84,18 @@ function key(e){if(e.defaultPrevented||!(e.ctrlKey||e.metaKey)||e.altKey)return;
 window.fcUndoKey=key;document.addEventListener('keydown',key);
 })();
 </script>"""
+
+
+def script():
+    return SCRIPT_TEMPLATE.replace("%FAILED%", core.js(t("That did not work.")))
+
+
+def __getattr__(name):
+    # core.page reads `undo_mod.SCRIPT`; built on each use so it follows the request's language.
+    if name == "SCRIPT":
+        return script()
+    raise AttributeError(name)
+
 
 def back_of(request, form_back):
     back = str(form_back or "")
@@ -103,7 +120,7 @@ async def undo_redo(request: Request, redo: bool):
             msg = clean(col.tr.actions_nothing_to_redo() if redo else col.tr.actions_nothing_to_undo())
             ok = False
         except Exception as e:
-            msg, ok = str(e) or "That did not work.", False
+            msg, ok = str(e) or t("That did not work."), False
         st = col.undo_status()
     if ajax:
         return {"ok": ok, "msg": msg, "undo": st.undo, "redo": st.redo}

@@ -16,11 +16,12 @@ from anki.consts import DYN_MAX_SIZE
 from anki.errors import FilteredDeckError, SearchError, DeckRenameError
 
 import app as core
+from flashcards.i18n import t, tn, N_
 
 router = APIRouter()
 Term = decks_pb2.Deck.Filtered.SearchTerm
 # preview delays, in seconds, as stored by the engine
-DELAYS = [("preview_again_secs", "Again"), ("preview_hard_secs", "Hard"), ("preview_good_secs", "Good")]
+DELAYS = [("preview_again_secs", N_("Again")), ("preview_hard_secs", N_("Hard")), ("preview_good_secs", N_("Good"))]
 MAX_DELAY = 99999
 
 JS = """<script>
@@ -36,12 +37,12 @@ def defaults(col):
     return col.sched.get_or_create_filtered_deck(0)
 
 
-def term_html(col, n, term, label):
+def term_html(col, n, term, heading):
     labels = list(col.sched.filtered_deck_order_labels())
-    opts = "".join(f'<option value="{i}"{" selected" if i == term.order else ""}>{html.escape(t)}</option>'
-                   for i, t in enumerate(labels))
+    opts = "".join(f'<option value="{i}"{" selected" if i == term.order else ""}>{html.escape(label)}</option>'
+                   for i, label in enumerate(labels))
     tr = col.tr
-    return f"""<h3 style="margin:14px 0 0">{html.escape(label)}</h3>
+    return f"""<h3 style="margin:14px 0 0">{html.escape(heading)}</h3>
 <label for="search{n}">{html.escape(tr.actions_search())}</label>
 <input id="search{n}" name="search{n}" value="{html.escape(term.search)}" autocapitalize="none" autocorrect="off" spellcheck="false">
 <div class="row" style="align-items:flex-end">
@@ -59,7 +60,8 @@ def form_html(col, fd, excluded=""):
     second_on = len(cfg.search_terms) > 1
     second = cfg.search_terms[1] if second_on else defaults(col).config.search_terms[1]
     delays = "".join(
-        f'<div><label for="{k}">{html.escape(tr.decks_delay_for_button(button=b))} (seconds)</label>'
+        f'<div><label for="{k}">'
+        f'{html.escape(t("{label} (seconds)", label=tr.decks_delay_for_button(button=t(b))))}</label>'
         f'<input type="number" id="{k}" name="{k}" value="{getattr(cfg, k)}" min="0" max="{MAX_DELAY}" style="width:140px"></div>'
         for k, b in DELAYS)
     show = ""
@@ -90,7 +92,7 @@ def form_html(col, fd, excluded=""):
 <input type="checkbox" name="allow_empty" value="1" {chk}{" checked" if fd.allow_empty else ""}>
 {html.escape(tr.decks_create_even_if_empty())}</label>
 <div class="row" style="margin-top:16px"><button class="primary">{html.escape(button)}</button>
-<a class="btn" href="{cancel}">Cancel</a></div></form></div>{JS}"""
+<a class="btn" href="{cancel}">{t("Cancel")}</a></div></form></div>{JS}"""
 
 
 def num(form, name, lo, hi, default):
@@ -98,7 +100,7 @@ def num(form, name, lo, hi, default):
     try:
         v = int(raw)
     except ValueError:
-        raise ValueError("Please enter a whole number.")
+        raise ValueError(t("Please enter a whole number."))
     return max(lo, min(hi, v))
 
 
@@ -106,9 +108,9 @@ def order(form, name):
     try:
         v = int(form.get(name, Term.Order.RANDOM))
     except ValueError:
-        raise ValueError("Unknown order.")
+        raise ValueError(t("Unknown order."))
     if v not in Term.Order.values():
-        raise ValueError("Unknown order.")
+        raise ValueError(t("Unknown order."))
     return v
 
 
@@ -156,7 +158,7 @@ def filtered_new(request: Request, search: str = "", did: int = 0):
         if search.strip():
             fd.config.search_terms[0].search = search.strip()
         body = form_html(col, fd)
-    return core.page("Create filtered deck", body, user, "decks", core.take_flash(request))
+    return core.page(t("Create filtered deck"), body, user, "decks", core.take_flash(request))
 
 
 @router.get("/deck/{did}/filtered", response_class=HTMLResponse)
@@ -169,7 +171,7 @@ def filtered_edit(request: Request, did: int):
         if not deck.get("dyn"):
             return RedirectResponse(f"/deck/{did}/options", 303)
         body = form_html(col, col.sched.get_or_create_filtered_deck(did))
-    return core.page("Filtered deck options", body, user, "decks", core.take_flash(request))
+    return core.page(t("Filtered deck options"), body, user, "decks", core.take_flash(request))
 
 
 @router.post("/filtered/save")
@@ -184,21 +186,21 @@ async def filtered_save(request: Request):
             return RedirectResponse("/", 303)
         except ValueError as e:
             fd = col.sched.get_or_create_filtered_deck(form_did(form))
-            return core.page("Filtered deck", form_html(col, fd), user, "decks", "!" + str(e))
+            return core.page(t("Filtered deck"), form_html(col, fd), user, "decks", "!" + str(e))
         if not fd.config.search_terms[0].search:
-            return core.page("Filtered deck", form_html(col, fd), user, "decks",
+            return core.page(t("Filtered deck"), form_html(col, fd), user, "decks",
                              "!" + col.tr.decks_please_select_something())
         try:
             new_id = col.sched.add_or_update_filtered_deck(fd).id
         except FilteredDeckError as e:
             # Anki keeps its dialog open and offers to show the cards that were left out.
-            return core.page("Filtered deck", form_html(col, fd, excluded=fd.config.search_terms[0].search),
+            return core.page(t("Filtered deck"), form_html(col, fd, excluded=fd.config.search_terms[0].search),
                              user, "decks", "!" + str(e))
         except (SearchError, DeckRenameError) as e:
-            return core.page("Filtered deck", form_html(col, fd), user, "decks", "!" + str(e))
+            return core.page(t("Filtered deck"), form_html(col, fd), user, "decks", "!" + str(e))
         core.select_deck(col, new_id)
         n = len(col.find_cards(f"did:{new_id}"))
-    core.set_flash(request, f"Deck built: {n} card{'s' if n != 1 else ''}.")
+    core.set_flash(request, tn("Deck built: {n} card.", "Deck built: {n} cards.", n))
     return RedirectResponse(f"/deck/{new_id}", 303)
 
 
@@ -211,7 +213,8 @@ def deck_rebuild(request: Request, did: int):
         if deck and deck.get("dyn"):
             try:
                 n = col.sched.rebuild_filtered_deck(did).count
-                core.set_flash(request, f"Deck rebuilt: {n} cards.")
+                # English has always said "cards" here, so both forms are the same.
+                core.set_flash(request, tn("Deck rebuilt: {n} cards.", "Deck rebuilt: {n} cards.", n))
             except Exception as e:
                 core.set_flash(request, "!" + str(e))
     return RedirectResponse(f"/deck/{did}", 303)
@@ -225,5 +228,5 @@ def deck_empty(request: Request, did: int):
         deck = col.decks.get(did, default=False)
         if deck and deck.get("dyn"):
             col.sched.empty_filtered_deck(did)
-            core.set_flash(request, "Deck emptied. Its cards are back in their home decks.")
+            core.set_flash(request, t("Deck emptied. Its cards are back in their home decks."))
     return RedirectResponse(f"/deck/{did}", 303)

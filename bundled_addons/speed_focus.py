@@ -9,12 +9,15 @@ from fastapi import APIRouter, Form, Request
 from fastapi.responses import RedirectResponse
 
 from flashcards import addons
+from flashcards.i18n import t, N_
 
-NAME = "Speed Focus Mode"
+NAME = "Speed Focus Mode"   # plain literal: flashcards/addons.py reads it without importing
+N_("Speed Focus Mode")      # ...so mark it for translation here
+N_('Keeps you moving: shows the answer and answers the card automatically after a set time.')  # the first docstring line, shown on the Add-ons page
 KEY = "addon_speed_focus"
 DEFAULTS = {"show_after": 0, "answer_after": 0, "action": 1}
-ACTIONS = {1: "Again", 2: "Hard", 3: "Good"}
-MENU = [("Set the times", "/")]
+ACTIONS = {1: N_("Again"), 2: N_("Hard"), 3: N_("Good")}
+MENU = [(N_("Set the times"), "/")]
 
 
 def settings(col):
@@ -60,18 +63,19 @@ router = APIRouter()
 def page(request: Request):
     with addons.collection(request) as col:
         s = settings(col)
-    opts = "".join(f'<option value="{k}" {"selected" if int(s["action"]) == k else ""}>{v}</option>'
+    opts = "".join(f'<option value="{k}" {"selected" if int(s["action"]) == k else ""}>{html.escape(t(v))}</option>'
                    for k, v in ACTIONS.items())
-    body = f"""<div class="box"><h2 style="margin-top:0">Speed Focus Mode</h2>
-<p class="muted">Use 0 to switch a timer off. The times only apply on the study screen.</p>
+    e = lambda x: html.escape(x, quote=False)
+    body = f"""<div class="box"><h2 style="margin-top:0">{e(t("Speed Focus Mode"))}</h2>
+<p class="muted">{e(t("Use 0 to switch a timer off. The times only apply on the study screen."))}</p>
 <form method="post"><div class="row"><div style="flex:1;min-width:180px">
-<label>Show the answer after (seconds)</label><input name="show_after" type="number" min="0" max="600" step="0.5"
+<label>{e(t("Show the answer after (seconds)"))}</label><input name="show_after" type="number" min="0" max="600" step="0.5"
 value="{html.escape(str(s['show_after']))}"></div><div style="flex:1;min-width:180px">
-<label>Answer the card after (seconds)</label><input name="answer_after" type="number" min="0" max="600" step="0.5"
+<label>{e(t("Answer the card after (seconds)"))}</label><input name="answer_after" type="number" min="0" max="600" step="0.5"
 value="{html.escape(str(s['answer_after']))}"></div><div style="flex:1;min-width:180px">
-<label>…by pressing</label><select name="action">{opts}</select></div></div>
-<p><button class="primary">Save</button> <a class="btn" href="/addons">Back to add-ons</a></p></form></div>"""
-    return addons.page(request, "Speed Focus Mode", body, request.session.pop("flash", ""))
+<label>{e(t("…by pressing"))}</label><select name="action">{opts}</select></div></div>
+<p><button class="primary">{e(t("Save"))}</button> <a class="btn" href="/addons">{e(t("Back to add-ons"))}</a></p></form></div>"""
+    return addons.page(request, t("Speed Focus Mode"), body, request.session.pop("flash", ""))
 
 
 @router.post("/")
@@ -80,5 +84,5 @@ def save(request: Request, show_after: float = Form(0), answer_after: float = Fo
         col.set_config(KEY, {"show_after": max(0.0, min(600.0, show_after)),
                              "answer_after": max(0.0, min(600.0, answer_after)),
                              "action": action if action in ACTIONS else 1})
-    request.session["flash"] = "Saved."
+    request.session["flash"] = t("Saved.")
     return RedirectResponse("/addon/speed_focus/", 303)

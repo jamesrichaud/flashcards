@@ -6,9 +6,15 @@ of it (ts/routes/image-occlusion/review.ts): it reads the shapes the engine rend
 hidden `.cloze` / `.cloze-inactive` / `.cloze-highlight` divs and paints them on the canvas over
 the image, using the colours from the note type's CSS. card_doc() adds it to any card that calls
 setup(), so study, previews and the card layout screen all show the masks.
-"""
 
-IO_REVIEW_JS = r"""<style>#image-occlusion-container{position:relative;display:inline-block;max-width:100%}
+The script's one message is translated when the card is rendered: IO_REVIEW_JS is a string whose
+`+`, str() and format() give the script in the current request's language.
+"""
+import json
+
+from flashcards.i18n import t
+
+_IO_REVIEW_TEMPLATE = r"""<style>#image-occlusion-container{position:relative;display:inline-block;max-width:100%}
 #image-occlusion-container img{display:block;max-width:100%;height:auto;margin:0 auto}
 #image-occlusion-canvas{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none}</style>
 <script>(function(){
@@ -62,10 +68,36 @@ function draw(img,cv){
 function setup(){
  var box=document.getElementById('image-occlusion-container'),cv=document.getElementById('image-occlusion-canvas');
  if(!box||!cv)return;var img=box.querySelector('img');
- if(!img){var er=document.getElementById('err');if(er)er.textContent='No image to occlude.';return;}
+ if(!img){var er=document.getElementById('err');if(er)er.textContent=__NO_IMAGE__;return;}
  var go=function(){draw(img,cv);};
  if(img.complete&&img.naturalWidth)go();img.addEventListener('load',go);window.addEventListener('resize',go);
  var t=document.getElementById('toggle');
  if(t)t.addEventListener('click',function(){cv.style.visibility=cv.style.visibility==='hidden'?'':'hidden';});}
 window.anki=window.anki||{};window.anki.imageOcclusion={setup:setup};
 })();</script>"""
+
+
+def io_review_js():
+    """The mask-drawing script with its message in the current language."""
+    msg = json.dumps(t("No image to occlude.")).replace("<", "\\u003c")
+    return _IO_REVIEW_TEMPLATE.replace("__NO_IMAGE__", msg)
+
+
+class _IOReviewJS(str):
+    """Kept as a module-level name for app.card_doc (`mj += IO_REVIEW_JS`); the text is built per
+    request so the message follows the interface language."""
+
+    def __radd__(self, other):
+        return other + io_review_js()
+
+    def __add__(self, other):
+        return io_review_js() + other
+
+    def __str__(self):
+        return io_review_js()
+
+    def __format__(self, spec):
+        return format(io_review_js(), spec)
+
+
+IO_REVIEW_JS = _IOReviewJS(_IO_REVIEW_TEMPLATE.replace("__NO_IMAGE__", json.dumps("No image to occlude.")))

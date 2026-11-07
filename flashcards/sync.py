@@ -28,6 +28,7 @@ from anki.sync import SyncAuth
 from anki.sync_pb2 import SyncCollectionResponse, SyncStatusResponse
 
 import app as core
+from flashcards.i18n import t, tn, N_
 
 router = APIRouter()
 
@@ -54,7 +55,7 @@ def normalise_server(url):
         return ""
     p = urlsplit(url)
     if p.scheme not in ("http", "https") or not p.netloc or p.query or p.fragment:
-        raise ValueError("The server address must look like http://computer:8080/")
+        raise ValueError(t("The server address must look like {example}", example="http://computer:8080/"))
     return url if url.endswith("/") else url + "/"
 
 
@@ -102,7 +103,7 @@ def server_label(conf_or_url):
 
 # ---------- engine calls (call while holding the user's collection lock) ----------
 def error_text(e):
-    msg = clean(str(e)) or "The sync server could not be reached."
+    msg = clean(str(e)) or t("The sync server could not be reached.")
     return msg
 
 
@@ -142,7 +143,7 @@ def sync_now(user, col, conf):
     except SyncError as e:
         if e.kind == SyncErrorKind.AUTH:
             update_conf(user, hkey="")
-            return "!" + (error_text(e) + " Please log in to the sync server again."), None
+            return "!" + t("{error} Please log in to the sync server again.", error=error_text(e)), None
         update_conf(user, last_error=error_text(e))
         return "!" + error_text(e), None
     except Exception as e:  # noqa: BLE001  (network errors and the like)
@@ -169,7 +170,7 @@ def full_sync(user, col, conf, upload, server_usn):
         try:
             maintenance.make_backup(user, col)
         except Exception as e:  # noqa: BLE001
-            return f"!Could not back up this collection first, so nothing was downloaded: {e}"
+            return "!" + t("Could not back up this collection first, so nothing was downloaded: {error}", error=e)
     wait_media_idle(col)
     col.close_for_full_sync()
     err = ""
@@ -187,8 +188,9 @@ def full_sync(user, col, conf, upload, server_usn):
     update_conf(user, last_sync=int(time.time()), last_error="")
     start_media(col, auth, conf)
     if upload:
-        return "Uploaded this collection to the sync server."
-    return f"Downloaded the collection from the sync server: {col.note_count()} notes."
+        return t("Uploaded this collection to the sync server.")
+    return tn("Downloaded the collection from the sync server: {n} note.",
+              "Downloaded the collection from the sync server: {n} notes.", col.note_count())
 
 
 def auto_sync(user, col):
@@ -208,7 +210,7 @@ def auto_sync(user, col):
     finally:
         release(user)
     if full:
-        return "!The sync server needs you to choose between uploading and downloading. Open Sync."
+        return "!" + t("The sync server needs you to choose between uploading and downloading. Open Sync.")
     return msg if msg.startswith("!") else ""
 
 
@@ -228,16 +230,16 @@ def release(user):
 def media_line(col, conf):
     """(text, active) for the media part of the page."""
     if not conf.get("media", True):
-        return "Pictures and sounds are not synced.", False
+        return t("Pictures and sounds are not synced."), False
     try:
         st = col.media_sync_status()
     except Exception as e:  # noqa: BLE001  (the engine throws the last media sync's error here)
-        return "Media sync failed: " + error_text(e), False
+        return t("Media sync failed: {error}", error=error_text(e)), False
     p = st.progress
     parts = [clean(x) for x in (p.checked, p.added, p.removed) if x]
     if st.active:
-        return "Syncing pictures and sounds… " + " · ".join(parts), True
-    return (("Last media sync: " + " · ".join(parts)) if parts else ""), False
+        return t("Syncing pictures and sounds… {progress}", progress=" · ".join(parts)), True
+    return (t("Last media sync: {progress}", progress=" · ".join(parts)) if parts else ""), False
 
 
 # ---------- live refresh between devices ----------
@@ -288,16 +290,21 @@ def status_text(col, auth):
     try:
         st = col.sync_status(auth)
     except Exception as e:  # noqa: BLE001
-        return "Could not check: " + error_text(e)
+        return t("Could not check: {error}", error=error_text(e))
     # The engine's status is about this side (the server is asked only now and then), so
     # "no changes" does not mean another device has nothing new.
-    return {SyncStatusResponse.NO_CHANGES: "No changes here since the last sync.",
-            SyncStatusResponse.NORMAL_SYNC: "Changes made here are waiting to be synced.",
-            SyncStatusResponse.FULL_SYNC: "A full sync is needed (upload or download)."}.get(st.required, "")
+    return {SyncStatusResponse.NO_CHANGES: t("No changes here since the last sync."),
+            SyncStatusResponse.NORMAL_SYNC: t("Changes made here are waiting to be synced."),
+            SyncStatusResponse.FULL_SYNC: t("A full sync is needed (upload or download).")}.get(st.required, "")
+
+
+def _e(s):
+    """Escape translated text for an HTML text node."""
+    return html.escape(s, False)
 
 
 def fmt_when(ts):
-    return time.strftime("%Y-%m-%d %H:%M", time.localtime(ts)) if ts else "never"
+    return time.strftime("%Y-%m-%d %H:%M", time.localtime(ts)) if ts else t("never")
 
 
 @router.get("/sync", response_class=HTMLResponse)
@@ -308,49 +315,54 @@ def sync_page(request: Request):
     auth = auth_of(conf)
     flash = core.take_flash(request)
     refresh = ""
-    devices = """<div class="box"><h2 style="margin-top:0">Your devices</h2>
-<p>Every iPad, Chromebook or computer that opens this app and logs in as you uses the same cards on this
-server, so they are always in step: there is nothing to sync between them. A page that was left open
-updates itself when you come back to it, if another device changed something.</p></div>"""
+    devices = f"""<div class="box"><h2 style="margin-top:0">{_e(t("Your devices"))}</h2>
+<p>{_e(t("Every iPad, Chromebook or computer that opens this app and logs in as you uses the same cards on this\n"
+         "server, so they are always in step: there is nothing to sync between them. A page that was left open\n"
+         "updates itself when you come back to it, if another device changed something."))}</p></div>"""
+    back = f'<p><a href="/settings" class="btn">{_e(t("← Settings"))}</a></p>'
+    heading = f'<h2 style="margin-top:0">{_e(t("Sync with Anki apps"))}</h2>'
     if not auth:
         server = conf.get("endpoint", default_server())
-        body = f"""{SYNC_CSS}<p><a href="/settings" class="btn">← Settings</a></p>{devices}
-<div class="box sync"><h2 style="margin-top:0">Sync with Anki apps</h2>
-<p class="muted">To use AnkiDroid, AnkiMobile or desktop Anki as well, log in here and in those apps to the same
-sync server: the one that comes with this app (see the README), another self-hosted Anki sync server, or AnkiWeb.
-Changes are then merged both ways when you sync, as between Anki apps.</p>
+        body = f"""{SYNC_CSS}{back}{devices}
+<div class="box sync">{heading}
+<p class="muted">{_e(t("To use AnkiDroid, AnkiMobile or desktop Anki as well, log in here and in those apps to the same\n"
+                       "sync server: the one that comes with this app (see the README), another self-hosted Anki sync "
+                       "server, or AnkiWeb.\nChanges are then merged both ways when you sync, as between Anki apps."))}</p>
 <form method="post" action="/sync/login">
-<label for="server">Sync server address (leave blank for AnkiWeb)</label>
+<label for="server">{_e(t("Sync server address (leave blank for AnkiWeb)"))}</label>
 <input id="server" name="server" value="{html.escape(server)}" placeholder="http://computer:8080/" autocapitalize="none" autocorrect="off" inputmode="url">
-<label for="username">User name or AnkiWeb email</label>
+<label for="username">{_e(t("User name or AnkiWeb email"))}</label>
 <input id="username" name="username" value="{html.escape(conf.get('username', ''))}" autocapitalize="none" autocorrect="off" required>
-<label for="password">Password</label><input id="password" name="password" type="password" required>
-<p class="muted" style="font-size:14px">Only a sync key from the server is kept, not your password.</p>
-<p><button class="primary">Log in</button></p></form></div>"""
-        return core.page("Sync", body, user, "settings", flash)
+<label for="password">{_e(t("Password"))}</label><input id="password" name="password" type="password" required>
+<p class="muted" style="font-size:14px">{_e(t("Only a sync key from the server is kept, not your password."))}</p>
+<p><button class="primary">{_e(t("Log in"))}</button></p></form></div>"""
+        return core.page(t("Sync"), body, user, "settings", flash)
     with core.collection(user) as col:
         state = status_text(col, auth)
         media, active = media_line(col, conf)
     if active:
         refresh = '<meta http-equiv="refresh" content="2">'
     err = conf.get("last_error", "")
-    body = f"""{SYNC_CSS}{refresh}<p><a href="/settings" class="btn">← Settings</a></p>{devices}
-<div class="box sync"><h2 style="margin-top:0">Sync with Anki apps</h2>
-<dl><dt>Server</dt><dd>{html.escape(server_label(conf))}</dd>
-<dt>Logged in as</dt><dd>{html.escape(conf.get('username', ''))}</dd>
-<dt>Last sync</dt><dd>{fmt_when(conf.get('last_sync'))}</dd>
-<dt>Now</dt><dd id="sync-state">{html.escape(state)}</dd>
-{f'<dt>Last error</dt><dd class="danger">{html.escape(err)}</dd>' if err else ''}
-{f'<dt>Media</dt><dd id="media-state">{html.escape(media)}</dd>' if media else ''}</dl>
-<form method="post" action="/sync/now"><p><button class="primary" style="min-width:160px">Sync now</button></p></form>
+    last_error = f'<dt>{_e(t("Last error"))}</dt><dd class="danger">{html.escape(err)}</dd>' if err else ''
+    media_row = f'<dt>{_e(t("Media"))}</dt><dd id="media-state">{html.escape(media)}</dd>' if media else ''
+    body = f"""{SYNC_CSS}{refresh}{back}{devices}
+<div class="box sync">{heading}
+<dl><dt>{_e(t("Server"))}</dt><dd>{html.escape(server_label(conf))}</dd>
+<dt>{_e(t("Logged in as"))}</dt><dd>{html.escape(conf.get('username', ''))}</dd>
+<dt>{_e(t("Last sync"))}</dt><dd>{_e(fmt_when(conf.get('last_sync')))}</dd>
+<dt>{_e(t("Now"))}</dt><dd id="sync-state">{html.escape(state)}</dd>
+{last_error}
+{media_row}</dl>
+<form method="post" action="/sync/now"><p><button class="primary" style="min-width:160px">{_e(t("Sync now"))}</button></p></form>
 <form method="post" action="/sync/options">
 <label class="chk"><input type="checkbox" name="auto" value="1"{' checked' if conf.get('auto') else ''}>
-Sync automatically when the deck list opens (at most every {AUTO_EVERY // 60} minutes)</label>
+{_e(tn("Sync automatically when the deck list opens (at most every {n} minute)",
+       "Sync automatically when the deck list opens (at most every {n} minutes)", AUTO_EVERY // 60))}</label>
 <label class="chk"><input type="checkbox" name="media" value="1"{' checked' if conf.get('media', True) else ''}>
-Sync pictures and sounds too</label>
-<button>Save</button></form>
-<form method="post" action="/sync/logout" style="margin-top:16px"><button class="danger">Log out of the sync server</button></form></div>"""
-    return core.page("Sync", body, user, "settings", flash)
+{_e(t("Sync pictures and sounds too"))}</label>
+<button>{_e(t("Save"))}</button></form>
+<form method="post" action="/sync/logout" style="margin-top:16px"><button class="danger">{_e(t("Log out of the sync server"))}</button></form></div>"""
+    return core.page(t("Sync"), body, user, "settings", flash)
 
 
 @router.post("/sync/login")
@@ -366,7 +378,7 @@ async def sync_login(request: Request):
         core.set_flash(request, "!" + str(e))
         return RedirectResponse("/sync", 303)
     if not username or not password:
-        core.set_flash(request, "!Type your sync user name and password.")
+        core.set_flash(request, "!" + t("Type your sync user name and password."))
         return RedirectResponse("/sync", 303)
     with core.collection(user) as col:
         try:
@@ -379,7 +391,7 @@ async def sync_login(request: Request):
     conf.update(endpoint=auth.endpoint or server, username=username, hkey=auth.hkey, last_error="")
     conf.setdefault("media", True)
     save_conf(user, conf)
-    core.set_flash(request, f"Logged in to {server_label(conf)}. Tap Sync now.")
+    core.set_flash(request, t("Logged in to {server}. Tap Sync now.", server=server_label(conf)))
     return RedirectResponse("/sync", 303)
 
 
@@ -389,7 +401,7 @@ def sync_logout(request: Request):
     if not user: return core.need_login(request)
     update_conf(user, hkey="", last_error="")
     request.session.pop("sync_full", None)
-    core.set_flash(request, "Logged out of the sync server. Your cards here are unchanged.")
+    core.set_flash(request, t("Logged out of the sync server. Your cards here are unchanged."))
     return RedirectResponse("/sync", 303)
 
 
@@ -399,7 +411,7 @@ async def sync_options(request: Request):
     if not user: return core.need_login(request)
     form = await request.form()
     update_conf(user, auto=bool(form.get("auto")), media=bool(form.get("media")))
-    core.set_flash(request, "Saved.")
+    core.set_flash(request, t("Saved."))
     return RedirectResponse("/sync", 303)
 
 
@@ -409,10 +421,10 @@ def sync_now_route(request: Request):
     if not user: return core.need_login(request)
     conf = load_conf(user)
     if not auth_of(conf):
-        core.set_flash(request, "!Log in to a sync server first.")
+        core.set_flash(request, "!" + t("Log in to a sync server first."))
         return RedirectResponse("/sync", 303)
     if not claim(user):
-        core.set_flash(request, "!A sync is already running. Please wait a moment.")
+        core.set_flash(request, "!" + t("A sync is already running. Please wait a moment."))
         return RedirectResponse("/sync", 303)
     try:
         with core.collection(user) as col:
@@ -429,13 +441,13 @@ def sync_now_route(request: Request):
 
 
 FULL_TEXT = {
-    SyncCollectionResponse.FULL_DOWNLOAD: ("This collection has no cards. Download the collection from the sync server?",
+    SyncCollectionResponse.FULL_DOWNLOAD: (N_("This collection has no cards. Download the collection from the sync server?"),
                                            ("download",)),
-    SyncCollectionResponse.FULL_UPLOAD: ("The sync server has no cards. Replace it with this collection?",
+    SyncCollectionResponse.FULL_UPLOAD: (N_("The sync server has no cards. Replace it with this collection?"),
                                          ("upload",)),
-    SyncCollectionResponse.FULL_SYNC: ("The cards here and on the sync server differ in a way that can't be merged "
-                                       "(for example a note type was changed on one side), so one side has to replace "
-                                       "the other.", ("download", "upload")),
+    SyncCollectionResponse.FULL_SYNC: (N_("The cards here and on the sync server differ in a way that can't be merged "
+                                          "(for example a note type was changed on one side), so one side has to replace "
+                                          "the other."), ("download", "upload")),
 }
 
 
@@ -450,21 +462,23 @@ def sync_full_page(request: Request):
     text, choices = FULL_TEXT.get(required, FULL_TEXT[SyncCollectionResponse.FULL_SYNC])
     opts = []
     if "download" in choices:
-        opts.append("""<div class="box"><h3 style="margin-top:0">Download</h3><p>Replace the cards here with the ones
-on the sync server. Changes made here since the last sync are lost (a backup of this collection is made first).</p>
+        opts.append(f"""<div class="box"><h3 style="margin-top:0">{_e(t("Download"))}</h3><p>{_e(t(
+            "Replace the cards here with the ones\non the sync server. Changes made here since the last sync are lost "
+            "(a backup of this collection is made first)."))}</p>
 <form method="post" action="/sync/full"><input type="hidden" name="choice" value="download">
-<label class="chk"><input type="checkbox" name="confirm" value="1" required>Replace the cards here</label>
-<button class="primary">Download from the server</button></form></div>""")
+<label class="chk"><input type="checkbox" name="confirm" value="1" required>{_e(t("Replace the cards here"))}</label>
+<button class="primary">{_e(t("Download from the server"))}</button></form></div>""")
     if "upload" in choices:
-        opts.append("""<div class="box"><h3 style="margin-top:0">Upload</h3><p>Replace the cards on the sync server
-with the ones here. Changes waiting on the server are lost, and other Anki apps will need to download.</p>
+        opts.append(f"""<div class="box"><h3 style="margin-top:0">{_e(t("Upload"))}</h3><p>{_e(t(
+            "Replace the cards on the sync server\nwith the ones here. Changes waiting on the server are lost, "
+            "and other Anki apps will need to download."))}</p>
 <form method="post" action="/sync/full"><input type="hidden" name="choice" value="upload">
-<label class="chk"><input type="checkbox" name="confirm" value="1" required>Replace the cards on the server</label>
-<button class="primary">Upload to the server</button></form></div>""")
-    body = f"""{SYNC_CSS}<div class="box"><h2 style="margin-top:0">Full sync needed</h2><p>{html.escape(text)}</p>
-<p class="muted">After this, reviews and new cards from every device are merged again as usual.</p></div>
-{''.join(opts)}<p><a class="btn" href="/sync">Cancel</a></p>"""
-    return core.page("Full sync", body, user, "settings", core.take_flash(request))
+<label class="chk"><input type="checkbox" name="confirm" value="1" required>{_e(t("Replace the cards on the server"))}</label>
+<button class="primary">{_e(t("Upload to the server"))}</button></form></div>""")
+    body = f"""{SYNC_CSS}<div class="box"><h2 style="margin-top:0">{_e(t("Full sync needed"))}</h2><p>{html.escape(t(text))}</p>
+<p class="muted">{_e(t("After this, reviews and new cards from every device are merged again as usual."))}</p></div>
+{''.join(opts)}<p><a class="btn" href="/sync">{_e(t("Cancel"))}</a></p>"""
+    return core.page(t("Full sync"), body, user, "settings", core.take_flash(request))
 
 
 @router.post("/sync/full")
@@ -481,10 +495,10 @@ async def sync_full(request: Request):
     if choice not in allowed:
         return RedirectResponse("/sync/full", 303)
     if not form.get("confirm"):
-        core.set_flash(request, "!Tick the box to confirm which side is replaced.")
+        core.set_flash(request, "!" + t("Tick the box to confirm which side is replaced."))
         return RedirectResponse("/sync/full", 303)
     if not claim(user):
-        core.set_flash(request, "!A sync is already running. Please wait a moment.")
+        core.set_flash(request, "!" + t("A sync is already running. Please wait a moment."))
         return RedirectResponse("/sync/full", 303)
     try:
         with core.collection(user) as col:

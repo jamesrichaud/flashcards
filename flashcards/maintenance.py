@@ -22,6 +22,7 @@ from anki.collection import Collection
 from anki.media import media_paths_from_col_path
 
 import app as core
+from flashcards.i18n import t, tn, N_
 
 router = APIRouter()
 KEEP = 30
@@ -32,6 +33,11 @@ _checked_lock = threading.Lock()
 
 def clean(s):
     return re.sub(r"[⁨⁩]", "", s or "")
+
+
+def esc(s):
+    """Escape translated text for an HTML text node (quotes left alone, so English output is unchanged)."""
+    return html.escape(s, quote=False)
 
 
 # ---------- backups ----------
@@ -77,10 +83,10 @@ def make_backup(user, col):
             if made:
                 name = made[0]
                 # Names have one-second precision: never overwrite an earlier backup.
-                t = backup_time(name)
+                when = backup_time(name)
                 while os.path.exists(os.path.join(folder, name)):
-                    t += datetime.timedelta(seconds=1)
-                    name = t.strftime("backup-%Y-%m-%d-%H.%M.%S.colpkg")
+                    when += datetime.timedelta(seconds=1)
+                    name = when.strftime("backup-%Y-%m-%d-%H.%M.%S.colpkg")
                 os.replace(os.path.join(stage, made[0]), os.path.join(folder, name))
     finally:
         shutil.rmtree(stage, ignore_errors=True)
@@ -120,8 +126,8 @@ def replace_collection(user, col, package_path, missing_fsrs=False):
                                           media_folder=media_folder, media_db=media_db)
         ok, err = True, ""
     except Exception as e:  # noqa: BLE001
-        ok, err = False, str(e) or "the file could not be read"
-    new = core._cols[user] = Collection(path)
+        ok, err = False, str(e) or t("the file could not be read")
+    new = core._cols[user] = core.i18n.open_collection(path)
     if new.get_config("fsrs", None) is None:
         new.set_config("fsrs", missing_fsrs)  # desktop Anki's meaning of a missing setting: FSRS off
     return ok, err
@@ -130,20 +136,21 @@ def replace_collection(user, col, package_path, missing_fsrs=False):
 def fmt_size(n):
     for unit in ("bytes", "KB", "MB", "GB"):
         if n < 1024 or unit == "GB":
-            return f"{n:.0f} {unit}" if unit == "bytes" else f"{n:.1f} {unit}"
+            return tn("{n} bytes", "{n} bytes", int(n)) if unit == "bytes" else f"{n:.1f} {unit}"
         n /= 1024
 
 
 def fmt_time(name):
-    t = backup_time(name)
-    return t.strftime("%a %d %b %Y, %H:%M") if t else name
+    when = backup_time(name)
+    return when.strftime("%a %d %b %Y, %H:%M") if when else name
 
 
 def latest_backup_line(user):
     names = list_backups(user)
     if not names:
-        return "No backups yet."
-    return f"Latest: {fmt_time(names[0])}. {len(names)} kept (up to {KEEP})."
+        return t("No backups yet.")
+    return tn("Latest: {time}. {n} kept (up to {keep}).", "Latest: {time}. {n} kept (up to {keep}).",
+              len(names), time=fmt_time(names[0]), keep=KEEP)
 
 
 @router.get("/backups", response_class=HTMLResponse)
@@ -157,19 +164,20 @@ def backups_page(request: Request):
     rows = []
     for i, n in enumerate(names):
         size = fmt_size(os.path.getsize(os.path.join(folder, n)))
-        tag = ' <span class="muted">(latest)</span>' if i == 0 else ""
-        rows.append(f"""<tr><td>{html.escape(fmt_time(n))}{tag}<br><span class="muted" style="font-size:14px">{size}</span></td>
-<td style="text-align:right;white-space:nowrap"><a class="btn" href="/backups/file/{quote(n)}" download>Download</a>
-<a class="btn" href="/backups/restore/{quote(n)}">Restore…</a></td></tr>""")
-    table = (f'<table>{"".join(rows)}</table>' if rows else '<p class="muted">No backups yet.</p>')
-    body = f"""<p><a href="/settings" class="btn">← Settings</a></p>
+        tag = f' <span class="muted">{esc(t("(latest)"))}</span>' if i == 0 else ""
+        rows.append(f"""<tr><td>{html.escape(fmt_time(n))}{tag}<br><span class="muted" style="font-size:14px">{esc(size)}</span></td>
+<td style="text-align:right;white-space:nowrap"><a class="btn" href="/backups/file/{quote(n)}" download>{esc(t("Download"))}</a>
+<a class="btn" href="/backups/restore/{quote(n)}">{esc(t("Restore…"))}</a></td></tr>""")
+    table = (f'<table>{"".join(rows)}</table>' if rows else f'<p class="muted">{esc(t("No backups yet."))}</p>')
+    body = f"""<p><a href="/settings" class="btn">{esc(t("← Settings"))}</a></p>
 <div class="box"><h2 style="margin-top:0">{html.escape(tr.preferences_backups())}</h2>
-<p class="muted">A backup of your cards is made automatically once a day, the first time you use the app that day.
-The {KEEP} newest backups are kept. Backups hold your cards, notes, decks and review history, but not pictures or
-sounds (the same as Anki's backups). A backup is also made before a backup is restored and before a .colpkg import.</p>
-<form method="post" action="/backups/create"><button class="primary">Back up now</button></form></div>
+<p class="muted">{esc(t("A backup of your cards is made automatically once a day, the first time you use the app that day."))}
+{esc(tn("The {n} newest backup is kept.", "The {n} newest backups are kept.", KEEP))}
+{esc(t("Backups hold your cards, notes, decks and review history, but not pictures or sounds (the same as Anki's backups)."))}
+{esc(t("A backup is also made before a backup is restored and before a .colpkg import."))}</p>
+<form method="post" action="/backups/create"><button class="primary">{esc(t("Back up now"))}</button></form></div>
 <div class="box">{table}</div>"""
-    return core.page("Backups", body, user, "settings", core.take_flash(request))
+    return core.page(t("Backups"), body, user, "settings", core.take_flash(request))
 
 
 @router.post("/backups/create")
@@ -195,7 +203,7 @@ def backups_download(request: Request, name: str):
     user = core.current_user(request)
     if not user: return core.need_login(request)
     if not valid_backup(user, name):
-        return Response("Not found", status_code=404)
+        return Response(t("Not found"), status_code=404)
     return FileResponse(os.path.join(backup_folder(user), name), media_type="application/octet-stream",
                         filename=name)
 
@@ -205,22 +213,25 @@ def restore_confirm(request: Request, name: str):
     user = core.current_user(request)
     if not user: return core.need_login(request)
     if not valid_backup(user, name):
-        core.set_flash(request, "!That backup was not found.")
+        core.set_flash(request, "!" + t("That backup was not found."))
         return RedirectResponse("/backups", 303)
     with core.collection(user) as col:
         notes, cards = col.note_count(), col.card_count()
-    body = f"""<div class="box"><h2 style="margin-top:0">Restore backup</h2>
-<p>Restore the backup from <b>{html.escape(fmt_time(name))}</b>?</p>
-<p>This <b>replaces everything</b> in your collection (now {notes} notes and {cards} cards) with the backup.
-Changes made since then will be lost from the collection, but a backup of how it is now is made first,
-so you can go back. Pictures and sounds are not changed.</p>
+    # markup kept in the key: splitting "replaces everything" out would break the sentence
+    replaces = t("This <b>replaces everything</b> in your collection (now {notes} notes and {cards} cards) with the backup.",
+                 notes=notes, cards=cards)
+    body = f"""<div class="box"><h2 style="margin-top:0">{esc(t("Restore backup"))}</h2>
+<p>{core.ht(t("Restore the backup from {time}?"), time=f"<b>{html.escape(fmt_time(name))}</b>")}</p>
+<p>{replaces}
+{esc(t("Changes made since then will be lost from the collection, but a backup of how it is now is made first, so you can go back."))}
+{esc(t("Pictures and sounds are not changed."))}</p>
 <form method="post" action="/backups/restore/{quote(name)}">
 <label class="row" style="color:var(--ink);font-size:17px;min-height:44px;cursor:pointer">
 <input type="checkbox" name="confirm" value="1" style="width:22px;height:22px;flex:none;margin:0">
-<span>I understand that my current collection will be replaced.</span></label>
-<div class="row"><button class="primary danger" style="color:#fff;background:var(--again);border-color:var(--again)">Restore</button>
-<a class="btn" href="/backups">Cancel</a></div></form></div>"""
-    return core.page("Restore backup", body, user, "settings", core.take_flash(request))
+<span>{esc(t("I understand that my current collection will be replaced."))}</span></label>
+<div class="row"><button class="primary danger" style="color:#fff;background:var(--again);border-color:var(--again)">{esc(t("Restore"))}</button>
+<a class="btn" href="/backups">{esc(t("Cancel"))}</a></div></form></div>"""
+    return core.page(t("Restore backup"), body, user, "settings", core.take_flash(request))
 
 
 @router.post("/backups/restore/{name}")
@@ -229,10 +240,10 @@ async def restore(request: Request, name: str):
     if not user: return core.need_login(request)
     form = await request.form()
     if not valid_backup(user, name):
-        core.set_flash(request, "!That backup was not found.")
+        core.set_flash(request, "!" + t("That backup was not found."))
         return RedirectResponse("/backups", 303)
     if not form.get("confirm"):
-        core.set_flash(request, "!Tick the box to confirm that your collection will be replaced.")
+        core.set_flash(request, "!" + t("Tick the box to confirm that your collection will be replaced."))
         return RedirectResponse(f"/backups/restore/{quote(name)}", 303)
     # Copy the chosen file first: the safety backup below may prune it if it is the oldest.
     fd, copy = tempfile.mkstemp(suffix=".colpkg", dir=backup_folder(user))
@@ -243,14 +254,16 @@ async def restore(request: Request, name: str):
             try:
                 make_backup(user, col)
             except Exception as e:  # noqa: BLE001
-                core.set_flash(request, f"!Could not back up the current collection, so nothing was restored: {e}")
+                core.set_flash(request, "!" + t("Could not back up the current collection, so nothing was restored: {error}",
+                                                error=e))
                 return RedirectResponse("/backups", 303)
             ok, err = replace_collection(user, col, copy)
             new = core._cols[user]
             if ok:
-                core.set_flash(request, f"Backup from {fmt_time(name)} restored: {new.note_count()} notes.")
+                core.set_flash(request, tn("Backup from {time} restored: {n} notes.", "Backup from {time} restored: {n} notes.",
+                                           new.note_count(), time=fmt_time(name)))
             else:
-                core.set_flash(request, f"!Restore failed, your collection was not changed: {err}")
+                core.set_flash(request, "!" + t("Restore failed, your collection was not changed: {error}", error=err))
     finally:
         try:
             os.remove(copy)
@@ -260,9 +273,9 @@ async def restore(request: Request, name: str):
 
 
 # ---------- Check Database ----------
-CHECK_INTRO = ("Looks for and fixes problems in your collection (cards without notes, wrong field counts, "
-               "broken properties, missing decks or templates) and rebuilds and optimises the database. "
-               "This is Anki's Tools &gt; Check Database.")
+CHECK_INTRO = N_("Looks for and fixes problems in your collection (cards without notes, wrong field counts, "
+                 "broken properties, missing decks or templates) and rebuilds and optimises the database. "
+                 "This is Anki's Tools > Check Database.")   # shown with esc(t(CHECK_INTRO))
 
 
 @router.get("/check-database", response_class=HTMLResponse)
@@ -271,8 +284,8 @@ def check_database_page(request: Request):
     if not user: return core.need_login(request)
     with core.collection(user) as col:
         title = col.tr.database_check_title()
-    body = f"""<p><a href="/settings" class="btn">← Settings</a></p>
-<div class="box"><h2 style="margin-top:0">{html.escape(title)}</h2><p class="muted">{CHECK_INTRO}</p>
+    body = f"""<p><a href="/settings" class="btn">{esc(t("← Settings"))}</a></p>
+<div class="box"><h2 style="margin-top:0">{html.escape(title)}</h2><p class="muted">{esc(t(CHECK_INTRO))}</p>
 <form method="post" action="/check-database"><button class="primary">{html.escape(title)}</button></form></div>"""
     return core.page(title, body, user, "settings", core.take_flash(request))
 
@@ -285,13 +298,13 @@ def check_database(request: Request):
         title = col.tr.database_check_title()
         text, ok = col.fix_integrity()
     lines = [clean(l) for l in text.split("\n") if l.strip()]
-    head = "No problems found." if ok else "Problems were found and fixed:"
+    head = t("No problems found.") if ok else t("Problems were found and fixed:")
     items = "".join(f"<li>{html.escape(l)}</li>" for l in lines)
-    body = f"""<p><a href="/settings" class="btn">← Settings</a></p>
+    body = f"""<p><a href="/settings" class="btn">{esc(t("← Settings"))}</a></p>
 <div class="box" id="result"><h2 style="margin-top:0">{html.escape(title)}</h2>
-<p><b>{head}</b></p><ul>{items}</ul>
-<div class="row"><form method="post" action="/check-database"><button>Check again</button></form>
-<a class="btn" href="/settings">Done</a></div></div>"""
+<p><b>{esc(head)}</b></p><ul>{items}</ul>
+<div class="row"><form method="post" action="/check-database"><button>{esc(t("Check again"))}</button></form>
+<a class="btn" href="/settings">{esc(t("Done"))}</a></div></div>"""
     return core.page(title, body, user, "settings")
 
 
@@ -314,9 +327,9 @@ def empty_report(col):
             line = clean(tr.empty_cards_count_line(empty_count=len(n.card_ids),
                                                    existing_count=len(note.card_ids()), template_names=names))
             first = core.strip_html(note.fields[0])[:80] if note.fields else ""
-            warn = (' <span class="muted">(no valid cards: the whole note would go)</span>'
+            warn = (f' <span class="muted">{esc(t("(no valid cards: the whole note would go)"))}</span>'
                     if n.will_delete_note else "")
-            items.append(f'<li><a href="/browse?q={quote(f"nid:{note.id}")}">{html.escape(first) or "(empty)"}</a>'
+            items.append(f'<li><a href="/browse?q={quote(f"nid:{note.id}")}">{html.escape(first) or esc(t("(empty)"))}</a>'
                          f' — {html.escape(line)}{warn}</li>')
         parts.append(f'<h3>{html.escape(clean(tr.empty_cards_for_note_type(notetype=nt["name"] if nt else "?")))}</h3>'
                      f'<ol>{"".join(items)}</ol>')
@@ -345,10 +358,10 @@ def empty_cards_page(request: Request):
         report_html, report = empty_report(col)
         if report.notes:
             n = sum(len(x.card_ids) for x in report.notes)
-            inner = f"""<p>{n} empty card(s) in {len(report.notes)} note(s). Empty cards are cards whose front
-is blank because the fields they use are empty (for example a reverse card after "Add Reverse" was cleared, or a
-cloze number that was removed).</p>
-<form method="post" action="/empty-cards" onsubmit="return confirm('Delete the empty cards?')">
+            inner = f"""<p>{esc(t("{cards} empty card(s) in {notes} note(s).", cards=n, notes=len(report.notes)))}
+{esc(t('Empty cards are cards whose front is blank because the fields they use are empty (for example a reverse '
+       'card after "Add Reverse" was cleared, or a cloze number that was removed).'))}</p>
+<form method="post" action="/empty-cards" onsubmit="return confirm({html.escape(core.js(t("Delete the empty cards?")))})">
 <label class="row" style="color:var(--ink);font-size:17px;min-height:44px;cursor:pointer">
 <input type="checkbox" name="keep_notes" value="1" checked style="width:22px;height:22px;flex:none;margin:0">
 <span>{html.escape(tr.empty_cards_preserve_notes_checkbox())}</span></label>
@@ -356,7 +369,7 @@ cloze number that was removed).</p>
 <div id="report">{report_html}</div>"""
         else:
             inner = f'<p>{html.escape(tr.empty_cards_not_found())}</p>'
-    body = f"""<p><a href="/settings" class="btn">← Settings</a></p>
+    body = f"""<p><a href="/settings" class="btn">{esc(t("← Settings"))}</a></p>
 <div class="box"><h2 style="margin-top:0">{html.escape(title)}</h2>{inner}</div>"""
     return core.page(title, body, user, "settings", core.take_flash(request))
 

@@ -16,12 +16,20 @@ from fastapi.responses import HTMLResponse
 from anki.collection import SearchNode
 
 import app as core
+from flashcards import i18n
+from flashcards.i18n import t, N_
 
 router = APIRouter()
 
 # Global time range, as in Anki's graph radio buttons: key -> (label, days, field in per-range data)
-RANGES = {"1m": ("1 month", 31, "one_month"), "3m": ("3 months", 90, "three_months"),
-          "1y": ("1 year", 365, "one_year"), "all": ("All", 0, "all_time")}
+RANGES = {"1m": (N_("1 month"), 31, "one_month"), "3m": (N_("3 months"), 90, "three_months"),
+          "1y": (N_("1 year"), 365, "one_year"), "all": (N_("All"), 0, "all_time")}
+# Calendar names (translated where shown); Monday first, as in Python's weekday().
+WEEKDAYS = [N_("Mon"), N_("Tue"), N_("Wed"), N_("Thu"), N_("Fri"), N_("Sat"), N_("Sun")]
+MONTHS = [N_("Jan"), N_("Feb"), N_("Mar"), N_("Apr"), N_("May"), N_("Jun"),
+          N_("Jul"), N_("Aug"), N_("Sep"), N_("Oct"), N_("Nov"), N_("Dec")]
+# Answer buttons, translated where shown.
+BUTTONS = [N_("Again"), N_("Hard"), N_("Good"), N_("Easy")]
 # Colours close to Anki's graphs.
 C = {"new": "#6baed6", "learn": "#fd8d3c", "relearn": "#e6550d", "young": "#74c476", "mature": "#31a354",
      "suspended": "#e8c547", "buried": "#9e9e9e", "filtered": "#9e7ad6", "bar": "#5b8def", "line": "#8e8e93",
@@ -74,21 +82,21 @@ def fmt_num(v):
 def fmt_secs(secs):
     """Short duration for review time: 45s, 12m, 3.4h."""
     if secs < 60:
-        return f"{round(secs)}s"
+        return t("{n}s", n=round(secs))
     if secs < 3600:
-        return f"{secs / 60:.0f}m" if secs >= 600 else f"{secs / 60:.1f}m"
-    return f"{secs / 3600:.1f}h"
+        return t("{n}m", n=f"{secs / 60:.0f}" if secs >= 600 else f"{secs / 60:.1f}")
+    return t("{n}h", n=f"{secs / 3600:.1f}")
 
 
 def fmt_days(days):
     """Interval/stability in Anki's short units (d, mo, y)."""
     if days < 1:
-        return f"{days * 24:.0f}h" if days > 0 else "0d"
+        return t("{n}h", n=f"{days * 24:.0f}") if days > 0 else t("{n}d", n=0)
     if days < 30:
-        return f"{days:.0f}d" if days >= 10 else f"{days:.1f}".rstrip("0").rstrip(".") + "d"
+        return t("{n}d", n=f"{days:.0f}" if days >= 10 else f"{days:.1f}".rstrip("0").rstrip("."))
     if days < 365:
-        return f"{days / 30:.1f}".rstrip("0").rstrip(".") + "mo"
-    return f"{days / 365:.1f}".rstrip("0").rstrip(".") + "y"
+        return t("{n}mo", n=f"{days / 30:.1f}".rstrip("0").rstrip("."))
+    return t("{n}y", n=f"{days / 365:.1f}".rstrip("0").rstrip("."))
 
 
 # ---------- SVG drawing ----------
@@ -106,12 +114,12 @@ def bar_chart(bins, colors, *, tips, xticks, line=None, line_max=None, line_fmt=
     gap = 1 if bw > 4 else 0
     y = lambda v: MT + ph - ph * v / top
     out = [f'<svg viewBox="0 0 {W} {H}" class="chart" role="img" aria-label="{esc(label)}">']
-    t = 0
-    while t <= top + 1e-9:
-        yy = y(t)
+    tick = 0
+    while tick <= top + 1e-9:
+        yy = y(tick)
         out.append(f'<line class="grid" x1="{ML}" x2="{W - MR}" y1="{yy:.1f}" y2="{yy:.1f}"/>'
-                   f'<text class="ax" x="{ML - 6}" y="{yy + 4:.1f}" text-anchor="end">{esc(yfmt(t))}</text>')
-        t += step
+                   f'<text class="ax" x="{ML - 6}" y="{yy + 4:.1f}" text-anchor="end">{esc(yfmt(tick))}</text>')
+        tick += step
     for i, vals in enumerate(bins):
         x = ML + i * bw
         base = 0
@@ -232,20 +240,19 @@ def day_bins(span):
 
 # ---------- the graphs ----------
 def today_html(tr, g, col):
-    t = g.today
-    if not t.answer_count:
+    td = g.today
+    if not td.answer_count:
         lines = [tr.statistics_today_no_cards()]
     else:
-        lines = [clean(col._backend.studied_today_message(cards=t.answer_count, seconds=t.answer_millis / 1000))
-                 .replace("\n", " ")]
-        again = t.answer_count - t.correct_count
-        lines.append(f"{tr.statistics_today_again_count()} {again} ({pct(again, t.answer_count, 2)}%)")
+        lines = [clean(i18n.studied_today(col, td.answer_count, td.answer_millis / 1000)).replace("\n", " ")]
+        again = td.answer_count - td.correct_count
+        lines.append(f"{tr.statistics_today_again_count()} {again} ({pct(again, td.answer_count, 2)}%)")
         lines.append(clean(tr.statistics_today_type_counts(
-            learn_count=t.learn_count, review_count=t.review_count, relearn_count=t.relearn_count,
-            filtered_count=t.early_review_count)))
-        if t.mature_count:
+            learn_count=td.learn_count, review_count=td.review_count, relearn_count=td.relearn_count,
+            filtered_count=td.early_review_count)))
+        if td.mature_count:
             lines.append(clean(tr.statistics_today_correct_mature(
-                correct=t.mature_correct, total=t.mature_count, percent=pct(t.mature_correct, t.mature_count, 2))))
+                correct=td.mature_correct, total=td.mature_count, percent=pct(td.mature_correct, td.mature_count, 2))))
         else:
             lines.append(tr.statistics_today_no_mature_cards())
     body = "".join(f"<p>{esc(l)}</p>" for l in lines)
@@ -266,7 +273,7 @@ def future_due_html(tr, g, span, scope_q, show_backlog):
             overdue = sum(v for k, v in fd.items() if k < 0)
             if overdue:
                 bins.append([overdue]); labels.append("<0")
-                tips.append(f"Overdue\n{clean(tr.statistics_cards_due(cards=overdue))}")
+                tips.append(f"{t('Overdue')}\n{clean(tr.statistics_cards_due(cards=overdue))}")
                 qs.append(and_q(scope_q, "prop:due<0"))
         for b in range(nb):
             lo, hi = b * step, min(end, (b + 1) * step) - 1
@@ -315,11 +322,12 @@ def calendar_html(tr, g, today, year, first_weekday, min_year, base_url):
     height = topm + 7 * cell + 4
     out = [f'<svg viewBox="0 0 {width:.0f} {height:.0f}" class="chart cal" role="img" '
            f'aria-label="{esc(tr.statistics_calendar_title())} {year}">']
-    days_lbl = ["S", "M", "T", "W", "T", "F", "S"]
     for r in range(7):
         if r % 2 == 1:
+            # First letter of the weekday's short name; Anki's day 0 is Sunday, Python's 0 is Monday.
+            letter = t(WEEKDAYS[((first_weekday + r) % 7 - 1) % 7])[:1]
             out.append(f'<text class="ax" x="{left - 6}" y="{topm + r * cell + cell - 3:.1f}" text-anchor="end">'
-                       f'{days_lbl[(first_weekday + r) % 7]}</text>')
+                       f'{esc(letter)}</text>')
     seen_month = set()
     d = grid_start
     studied = 0
@@ -330,7 +338,7 @@ def calendar_html(tr, g, today, year, first_weekday, min_year, base_url):
         if d >= start:
             if d.month not in seen_month and d.day <= 7:
                 seen_month.add(d.month)
-                out.append(f'<text class="ax" x="{x:.1f}" y="{topm - 5}">{d.strftime("%b")}</text>')
+                out.append(f'<text class="ax" x="{x:.1f}" y="{topm - 5}">{esc(t(MONTHS[d.month - 1]))}</text>')
             off = (d - today).days
             v = counts.get(off, 0)
             if v:
@@ -341,7 +349,9 @@ def calendar_html(tr, g, today, year, first_weekday, min_year, base_url):
             else:
                 fill = ""
                 cls = ' class="empty"' if off <= 0 else ' class="future"'
-            tip = f'{d.strftime("%a")} {d.day} {d.strftime("%b %Y")}\n{clean(tr.statistics_reviews(reviews=v))}'
+            day = t("{weekday} {day} {month} {year}", weekday=t(WEEKDAYS[d.weekday()]), day=d.day,
+                    month=t(MONTHS[d.month - 1]), year=d.year)
+            tip = f'{day}\n{clean(tr.statistics_reviews(reviews=v))}'
             fill_attr = f' fill="{fill}"' if fill else ""
             out.append(f'<rect x="{x + 1:.1f}" y="{y + 1:.1f}" width="{cell - pad:.1f}" height="{cell - pad:.1f}" rx="2"'
                        f'{fill_attr}{cls}/>')
@@ -351,10 +361,10 @@ def calendar_html(tr, g, today, year, first_weekday, min_year, base_url):
     out.append("</svg>")
     nav = '<div class="row calnav">'
     if year > min_year:
-        nav += f'<a class="btn" href="{esc(base_url(year=year - 1))}" aria-label="Previous year">◀</a>'
+        nav += f'<a class="btn" href="{esc(base_url(year=year - 1))}" aria-label="{esc(t("Previous year"))}">◀</a>'
     nav += f'<b>{year}</b>'
     if year < today.year:
-        nav += f'<a class="btn" href="{esc(base_url(year=year + 1))}" aria-label="Next year">▶</a>'
+        nav += f'<a class="btn" href="{esc(base_url(year=year + 1))}" aria-label="{esc(t("Next year"))}">▶</a>'
     nav += f'<span class="muted">{esc(tr.statistics_days_studied())}: {studied}</span></div>'
     return graph(tr.statistics_calendar_title(), "", nav + "".join(out))
 
@@ -401,7 +411,8 @@ def reviews_html(tr, g, span, scope_q):
         run, tot = [], 0
         for b in bins:
             tot += sum(b); run.append(tot)
-        yfmt = (lambda v: f"{v:.0f}m" if v >= 1 or v == 0 else f"{v * 60:.0f}s") if is_time else fmt_num
+        yfmt = ((lambda v: t("{n}m", n=f"{v:.0f}") if v >= 1 or v == 0 else t("{n}s", n=f"{v * 60:.0f}"))
+                if is_time else fmt_num)
         lfmt = (lambda v: fmt_secs(v * 60)) if is_time else fmt_num
         svg = bar_chart(bins, [C[k] for k, _ in REV_KINDS], tips=tips, xticks=tick_list(nb, labels),
                         line=run, line_max=max(tot, 1e-9), line_fmt=lfmt, queries=None if is_time else qs,
@@ -452,7 +463,7 @@ def card_counts_html(tr, g, separate):
         total = sum(v for _, v, _ in parts)
         rows = "".join(f'<tr><th><i style="background:{col}"></i>{esc(n)}</th><td>{v}</td>'
                        f'<td class="muted">{pct(v, total, 2)}%</td></tr>' for n, v, col in parts)
-        rows += f'<tr class="tot"><th>Total cards</th><td>{total}</td><td></td></tr>'
+        rows += f'<tr class="tot"><th>{esc(t("Total cards"))}</th><td>{total}</td><td></td></tr>'
         if not total:
             return f'<div class="nodata">{esc(tr.statistics_no_data())}</div>'
         return (f'<div class="row pierow">{donut(parts, total, tr.statistics_counts_title())}'
@@ -497,14 +508,14 @@ def days_hist_html(tr, hist, *, title, subtitle, tip_single, tip_range, avg_labe
             acc += v
             bins.append([v]); labels.append(fmt_days(lo) if lo else "0")
             run.append(100 * acc / total)
-            t = clean(tip_single(cards=v, day=lo) if lo == hi else tip_range(cards=v, days_start=lo, days_end=hi))
-            tips.append(f"{t}\n{tr.statistics_running_total()}: {run[-1]:.1f}%")
+            tip = clean(tip_single(cards=v, day=lo) if lo == hi else tip_range(cards=v, days_start=lo, days_end=hi))
+            tips.append(f"{tip}\n{tr.statistics_running_total()}: {run[-1]:.1f}%")
             qs.append(and_q(scope_q, f"prop:{prop}={lo}" if lo == hi else f"prop:{prop}>={lo} prop:{prop}<={hi}"))
         return bar_chart(bins, [C["bar"]], tips=tips, xticks=tick_list(nb, labels), line=run, line_max=100,
                          line_fmt=lambda v: f"{v:.0f}%", queries=qs if prop else None,
                          no_data=tr.statistics_no_data(), label=title)
 
-    views = [("1 month", chart(31)), ("50%", chart(percentile(hist, 0.5))),
+    views = [(t("1 month"), chart(31)), ("50%", chart(percentile(hist, 0.5))),
              ("95%", chart(percentile(hist, 0.95))), (tr.statistics_range_all_time(), chart(mx))]
     rows = [(avg_label, fmt_days(avg)), (median_label, fmt_days(med))]
     return graph(title, subtitle, tabs(views, 2) + summary(rows))
@@ -555,7 +566,8 @@ def hours_html(tr, g, field):
     svg = bar_chart(bins, [C["bar"]], tips=tips, xticks=[(i, str(i)) for i in range(0, 24, 3)],
                     line=rate, line_max=100, line_fmt=lambda v: f"{v:.0f}%", label=tr.statistics_hours_title())
     return graph(tr.statistics_hours_title(), tr.statistics_hours_subtitle(),
-                 svg + f'<p class="muted small">Bars: reviews · Line: % correct {esc(tr.statistics_hours_correct_info())}</p>')
+                 svg + '<p class="muted small">'
+                 + esc(t("Bars: reviews · Line: % correct {info}", info=tr.statistics_hours_correct_info())) + '</p>')
 
 
 def buttons_html(tr, g, field):
@@ -566,7 +578,7 @@ def buttons_html(tr, g, field):
     if not any(sum(v) for _, v in groups):
         return graph(tr.statistics_answer_buttons_title(), tr.statistics_answer_buttons_subtitle(),
                      f'<div class="nodata">{esc(tr.statistics_no_data())}</div>')
-    names = ["Again", "Hard", "Good", "Easy"]
+    names = [t(n) for n in BUTTONS]
     cols = [C["again"], C["hard"], C["good"], C["easy"]]
     bins, tips, xt, colors = [], [], [], []
     # One bar per button per group, with an empty slot between groups.
@@ -582,14 +594,15 @@ def buttons_html(tr, g, field):
         xt.append((len(bins) - 3, gname))
         if gi < 2:
             bins.append([0, 0, 0, 0]); tips.append("")
-    svg = bar_chart(bins, cols, tips=tips, xticks=[(i - 0.5, t) for i, t in xt], label=tr.statistics_answer_buttons_title())
+    svg = bar_chart(bins, cols, tips=tips, xticks=[(i - 0.5, text) for i, text in xt], label=tr.statistics_answer_buttons_title())
     rows = []
     for gname, vals in groups:
         vals = (vals + [0, 0, 0, 0])[:4]
         tot = sum(vals)
         if tot:
-            rows.append((gname, f"Correct: {tot - vals[0]}/{tot} ({pct(tot - vals[0], tot, 2)}%)"))
-    legend = "".join(f'<span><i style="background:{c}"></i>{n}</span>' for n, c in zip(names, cols))
+            rows.append((gname, t("Correct: {correct}/{total} ({percent}%)", correct=tot - vals[0], total=tot,
+                                  percent=pct(tot - vals[0], tot, 2))))
+    legend = "".join(f'<span><i style="background:{c}"></i>{esc(n)}</span>' for n, c in zip(names, cols))
     return graph(tr.statistics_answer_buttons_title(), tr.statistics_answer_buttons_subtitle(),
                  f'<div class="legend">{legend}</div>{svg}{summary(rows)}')
 
@@ -701,7 +714,7 @@ SCRIPT = """<script>
     el.classList.add('on');
     tip.textContent=el.getAttribute('data-tip')||'';
     var q=el.getAttribute('data-q');
-    if(q){var a=document.createElement('a');a.href='/browse?q='+encodeURIComponent(q);a.textContent='Browse';tip.appendChild(a);}
+    if(q){var a=document.createElement('a');a.href='/browse?q='+encodeURIComponent(q);a.textContent=__BROWSE__;tip.appendChild(a);}
   }
   document.addEventListener('click',function(e){var h=e.target.closest&&e.target.closest('.hit');if(h)show(h);});
   document.addEventListener('mouseover',function(e){
@@ -752,7 +765,7 @@ def stats(request: Request, did: str = "", q: str = "", span: str = Query("1m", 
         try:
             g = col._backend.graphs(search=search, days=fetch_days)
         except Exception as e:
-            flash = "!" + (str(e) or "That search did not work.")
+            flash = "!" + (str(e) or t("That search did not work."))
             q, search = "", ""
             g = col._backend.graphs(search="", days=fetch_days)
         decks = sorted(col.decks.all_names_and_ids(), key=lambda d: d.name.lower())
@@ -769,17 +782,18 @@ def stats(request: Request, did: str = "", q: str = "", span: str = Query("1m", 
         return "/stats?" + "&".join(f"{k}={core.quote(v)}" for k, v in params.items())
 
     opts = [f'<option value="0"{" selected" if not deck_id and not q.strip() else ""}>'
-            f'Whole {esc(tr.statistics_range_collection())}</option>']
+            f'{esc(t("Whole {collection}", collection=tr.statistics_range_collection()))}</option>']
     opts += [f'<option value="{d.id}"{" selected" if d.id == deck_id and not q.strip() else ""}>{esc(d.name)}</option>'
              for d in decks]
-    ranges = "".join(f'<a class="btn{" on" if k == span else ""}" href="{esc(url(range=k))}">{esc(lab)}</a>'
+    ranges = "".join(f'<a class="btn{" on" if k == span else ""}" href="{esc(url(range=k))}">{esc(t(lab))}</a>'
                      for k, (lab, _, _) in RANGES.items())
+    placeholder = t("{search}: e.g. tag:verbs", search=tr.statistics_range_search())
     controls = f"""<div class="box"><h2 style="margin:0 0 10px">{esc(tr.statistics_title())}</h2>
 <form method="get" action="/stats" class="row scope"><input type="hidden" name="range" value="{esc(span)}">
-<select name="did" aria-label="Deck" onchange="this.form.q.value='';this.form.submit()">{''.join(opts)}</select>
-<input name="q" value="{esc(q.strip())}" placeholder="{esc(tr.statistics_range_search())}: e.g. tag:verbs" aria-label="Search">
-<button>Show</button></form>
-<div class="row ranges">{ranges}<button type="button" onclick="window.print()" style="margin-left:auto">Print / PDF</button></div>
+<select name="did" aria-label="{esc(t("Deck"))}" onchange="this.form.q.value='';this.form.submit()">{''.join(opts)}</select>
+<input name="q" value="{esc(q.strip())}" placeholder="{esc(placeholder)}" aria-label="{esc(t("Search"))}">
+<button>{esc(t("Show"))}</button></form>
+<div class="row ranges">{ranges}<button type="button" onclick="window.print()" style="margin-left:auto">{esc(t("Print / PDF"))}</button></div>
 </div>"""
 
     scope_q = search
@@ -819,8 +833,8 @@ def stats(request: Request, did: str = "", q: str = "", span: str = Query("1m", 
             median_label=tr.statistics_median_ease(), lo=130, hi=300, step=10, scope_q=scope_q, prop="ease"))
     parts += [hours_html(tr, g, field), buttons_html(tr, g, field), added_html(tr, g, span_days, scope_q),
               true_retention_html(tr, g)]
-    scope_text = (f"Search: {q.strip()}" if q.strip() else
-                  next((f"Deck: {d.name}" for d in decks if d.id == deck_id), "Whole collection"))
-    body = (STYLE + controls + f'<p class="muted" style="margin:-6px 4px 12px">{esc(scope_text)} · {esc(span_label)}</p>'
-            + "".join(parts) + SCRIPT)
+    scope_text = (t("Search: {search}", search=q.strip()) if q.strip() else
+                  next((t("Deck: {name}", name=d.name) for d in decks if d.id == deck_id), t("Whole collection")))
+    body = (STYLE + controls + f'<p class="muted" style="margin:-6px 4px 12px">{esc(scope_text)} · {esc(t(span_label))}</p>'
+            + "".join(parts) + SCRIPT.replace("__BROWSE__", core.js(t("Browse"))))
     return core.page(tr.statistics_title(), body, user, "stats", flash)

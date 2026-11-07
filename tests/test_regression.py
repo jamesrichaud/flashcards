@@ -35,6 +35,13 @@ ok("login, offline and 404 pages load while logged out")
 
 # ---------- a realistic collection ----------
 c.post("/login", data={"username": "regress", "password": "secret123"})
+# tests/test_i18n.py runs this whole file once per language (FC_TEST_LANG=es, fr, ...).
+TEST_LANG = os.environ.get("FC_TEST_LANG", "")
+if TEST_LANG:
+    webapp.set_user_lang("regress", TEST_LANG)
+    webapp.reopen_collection("regress")
+    assert f'lang="{TEST_LANG}"' in c.get("/").text
+    print("language:", TEST_LANG)
 with webapp.collection("regress") as col:
     col.media.write_data("pic.png", png(40, 20))
     bio = col.decks.id("Biology")

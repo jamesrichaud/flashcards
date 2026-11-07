@@ -7,7 +7,7 @@ preview renders the unsaved template with `TemplateRenderContext.from_card_layou
 Anki's card layout screen uses), and changing the note type of notes uses
 `change_notetype_info` / `change_notetype_of_notes`.
 """
-import html, json, re
+import html, re
 from urllib.parse import quote
 
 from fastapi import APIRouter, Request
@@ -19,6 +19,7 @@ from anki.stdmodels import get_stock_notetypes
 from anki.template import TemplateRenderContext
 
 import app as core
+from flashcards.i18n import t, tn
 
 router = APIRouter()
 
@@ -43,7 +44,7 @@ def clean_err(e):
     s = re.sub(r"[⁨⁩]", "", str(e))
     s = re.sub(r"<br\s*/?>", " ", s)
     s = re.sub(r"<a [^>]*>.*?</a>", "", s, flags=re.S)
-    return html.unescape(re.sub(r"<[^>]+>", "", s)).strip() or "That did not work."
+    return html.unescape(re.sub(r"<[^>]+>", "", s)).strip() or t("That did not work.")
 
 
 def get_nt(col, ntid):
@@ -57,8 +58,13 @@ def is_cloze(nt):
     return nt["type"] == MODEL_CLOZE
 
 
-def plural(n, w):
-    return f"{n} {w}{'' if n == 1 else 's'}"
+def notes_n(n):
+    return tn("{n} note", "{n} notes", n)
+
+
+def confirm_attr(text):
+    """onsubmit="..." that asks before submitting (text is plain; quoted for JS and the attribute)."""
+    return f'onsubmit="return confirm({html.escape(core.js(text))})"'
 
 
 def guard(request):
@@ -76,25 +82,26 @@ def list_html(col):
     for m in sorted(col.models.all_use_counts(), key=lambda m: m.name.lower()):
         nm = html.escape(m.name)
         rows.append(f"""<div class="nt-row"><span class="nt-name">{nm}
-<span class="muted" style="font-weight:400;font-size:14px"> · {plural(m.use_count, 'note')}</span></span>
-<span class="row"><a class="btn" href="/notetypes/{m.id}/fields">Fields</a>
-<a class="btn" href="/notetypes/{m.id}/cards">Cards</a>
-<a class="btn" href="/browse?q={quote(f'note:{m.name}')}">Browse</a>
-<details class="opts"><summary class="btn">More ▾</summary>
+<span class="muted" style="font-weight:400;font-size:14px"> · {html.escape(notes_n(m.use_count))}</span></span>
+<span class="row"><a class="btn" href="/notetypes/{m.id}/fields">{html.escape(t("Fields"))}</a>
+<a class="btn" href="/notetypes/{m.id}/cards">{html.escape(t("Cards"))}</a>
+<a class="btn" href="/browse?q={quote(f'note:{m.name}')}">{html.escape(t("Browse"))}</a>
+<details class="opts"><summary class="btn">{html.escape(t("More"))} ▾</summary>
 <div class="row" style="margin-top:8px"><form method="post" action="/notetypes/{m.id}/rename" class="row">
-<input name="name" value="{nm}" aria-label="New name" style="width:220px" required><button>Rename</button></form>
+<input name="name" value="{nm}" aria-label="{html.escape(t("New name"))}" style="width:220px" required><button>{html.escape(t("Rename"))}</button></form>
 <form method="post" action="/notetypes/{m.id}/delete"
-onsubmit="return confirm('Delete {html.escape(json.dumps(m.name)[1:-1])} and its {plural(m.use_count, 'note')}? This cannot be undone.')">
-<button class="danger">Delete</button></form></div></details></span></div>""")
-    opts = "".join(f'<option value="stock:{i}">Add: {html.escape(nt["name"])}</option>'
+{confirm_attr(tn("Delete {name} and its {n} note? This cannot be undone.",
+                 "Delete {name} and its {n} notes? This cannot be undone.", m.use_count, name=m.name))}>
+<button class="danger">{html.escape(t("Delete"))}</button></form></div></details></span></div>""")
+    opts = "".join(f'<option value="stock:{i}">{html.escape(t("Add: {name}", name=nt["name"]))}</option>'
                    for i, nt in enumerate(stock_types(col)))
-    opts += "".join(f'<option value="clone:{m.id}">Clone: {html.escape(m.name)}</option>'
+    opts += "".join(f'<option value="clone:{m.id}">{html.escape(t("Clone: {name}", name=m.name))}</option>'
                     for m in sorted(col.models.all_names_and_ids(), key=lambda m: m.name.lower()))
-    return f"""{CSS}<div class="box"><h2 style="margin-top:0">Note types</h2>{''.join(rows)}</div>
-<div class="box"><h3 style="margin-top:0">Add note type</h3><form method="post" action="/notetypes/add">
-<label for="base">Start from</label><select id="base" name="base">{opts}</select>
-<label for="ntname">Name (leave blank to use the type's name)</label><input id="ntname" name="name">
-<p style="margin-bottom:0"><button class="primary">Add</button></p></form></div>"""
+    return f"""{CSS}<div class="box"><h2 style="margin-top:0">{html.escape(t("Note types"))}</h2>{''.join(rows)}</div>
+<div class="box"><h3 style="margin-top:0">{html.escape(t("Add note type"))}</h3><form method="post" action="/notetypes/add">
+<label for="base">{html.escape(t("Start from"))}</label><select id="base" name="base">{opts}</select>
+<label for="ntname">{html.escape(t("Name (leave blank to use the type's name)"), quote=False)}</label><input id="ntname" name="name">
+<p style="margin-bottom:0"><button class="primary">{html.escape(t("Add"))}</button></p></form></div>"""
 
 
 @router.get("/notetypes", response_class=HTMLResponse)
@@ -103,7 +110,7 @@ def notetypes(request: Request):
     if not user: return core.need_login(request)
     with core.collection(user) as col:
         body = list_html(col)
-    return core.page("Note types", body, user, "settings", core.take_flash(request))
+    return core.page(t("Note types"), body, user, "settings", core.take_flash(request))
 
 
 @router.post("/notetypes/add")
@@ -121,14 +128,14 @@ async def notetype_add(request: Request):
             elif kind == "clone":
                 nt = col.models.copy(get_nt(col, int(arg)), add=False)
             else:
-                raise ValueError("Choose a note type to start from.")
+                raise ValueError(t("Choose a note type to start from."))
             if name:
                 nt["name"] = name
             col.models.ensure_name_unique(nt)
             new_id = col.models.add_dict(nt).id
-            core.set_flash(request, f"Added note type “{col.models.get(new_id)['name']}”.")
+            core.set_flash(request, t("Added note type “{name}”.", name=col.models.get(new_id)['name']))
         except (ValueError, IndexError, LookupError) as e:
-            core.set_flash(request, "!" + (str(e) if isinstance(e, ValueError) and str(e) else "Unknown note type."))
+            core.set_flash(request, "!" + (str(e) if isinstance(e, ValueError) and str(e) else t("Unknown note type.")))
             return RedirectResponse("/notetypes", 303)
         except Exception as e:
             core.set_flash(request, "!" + clean_err(e))
@@ -146,12 +153,12 @@ async def notetype_rename(request: Request, ntid: int):
         try:
             nt = get_nt(col, ntid)
             if not name:
-                raise ValueError("Enter a name.")
+                raise ValueError(t("Enter a name."))
             if name != nt["name"]:
                 nt["name"] = name
                 col.models.ensure_name_unique(nt)
                 col.models.update_dict(nt)
-                core.set_flash(request, f"Renamed to “{nt['name']}”.")
+                core.set_flash(request, t("Renamed to “{name}”.", name=nt['name']))
         except LookupError:
             pass
         except Exception as e:
@@ -167,9 +174,9 @@ def notetype_delete(request: Request, ntid: int):
         try:
             nt = get_nt(col, ntid)
             if len(col.models.all_names_and_ids()) < 2:
-                raise ValueError("You can't delete the last note type.")
+                raise ValueError(t("You can't delete the last note type."))
             col.models.remove(ntid)
-            core.set_flash(request, f"Deleted “{nt['name']}”.")
+            core.set_flash(request, t("Deleted “{name}”.", name=nt['name']))
         except LookupError:
             pass
         except Exception as e:
@@ -183,10 +190,10 @@ def clean_field_name(nt, name, skip=None):
     name = re.sub(r'[:{}"]', "", name.replace("\n", " ")).strip()
     name = name.lstrip("#/^").strip()
     if not name:
-        raise ValueError("Enter a field name.")
+        raise ValueError(t("Enter a field name."))
     for f in nt["flds"]:
         if f is not skip and f["name"].lower() == name.lower():
-            raise ValueError("That field name is already used.")
+            raise ValueError(t("That field name is already used."))
     return name
 
 
@@ -202,34 +209,35 @@ def fields_html(col, nt):
             return f'<input type="hidden" name="op" value="{op}"><input type="hidden" name="idx" value="{i}">'
         chk = lambda key: " checked" if f.get(key) else ""
         rows.append(f"""<div class="nt-row"><span class="nt-name">{i + 1}. {nm}
-{' <span class="muted" style="font-size:14px;font-weight:400">· sort field</span>' if i == sort_idx else ''}</span>
+{' <span class="muted" style="font-size:14px;font-weight:400">· ' + html.escape(t("sort field")) + '</span>' if i == sort_idx else ''}</span>
 <span class="row"><form method="post" action="/notetypes/{ntid}/fields" class="row">{hidden("move")}
-<select name="to" aria-label="Position of {nm}" style="width:auto" onchange="this.form.submit()">{pos}</select></form>
-<details class="opts"><summary class="btn">Options ▾</summary>
+<select name="to" aria-label="{html.escape(t("Position of {name}", name=f["name"]))}" style="width:auto" onchange="this.form.submit()">{pos}</select></form>
+<details class="opts"><summary class="btn">{html.escape(t("Options"))} ▾</summary>
 <form method="post" action="/notetypes/{ntid}/fields" class="row" style="margin-top:8px">{hidden("rename")}
-<input name="name" value="{nm}" aria-label="New name for {nm}" style="width:200px" required><button>Rename</button></form>
+<input name="name" value="{nm}" aria-label="{html.escape(t("New name for {name}", name=f["name"]))}" style="width:200px" required><button>{html.escape(t("Rename"))}</button></form>
 <form method="post" action="/notetypes/{ntid}/fields" style="margin-top:8px">{hidden("options")}
-<div class="row"><div><label>Editing font</label><input name="font" value="{html.escape(f.get('font', 'Arial'))}" style="width:180px"></div>
-<div><label>Size</label><input type="number" name="size" min="5" max="300" value="{int(f.get('size', 20) or 20)}" style="width:90px"></div></div>
-<label>Description (shown in the empty field when adding)</label><input name="description" value="{html.escape(f.get('description', ''))}">
-<label class="chk"><input type="checkbox" name="sort" value="1"{" checked" if i == sort_idx else ""}>Sort by this field in the browser</label>
-<label class="chk"><input type="checkbox" name="rtl" value="1"{chk("rtl")}>Use right-to-left direction</label>
-<label class="chk"><input type="checkbox" name="sticky" value="1"{chk("sticky")}>Remember last input when adding</label>
-<label class="chk"><input type="checkbox" name="plainText" value="1"{chk("plainText")}>Use HTML editor by default</label>
-<label class="chk"><input type="checkbox" name="collapsed" value="1"{chk("collapsed")}>Collapse by default</label>
-<label class="chk"><input type="checkbox" name="excludeFromSearch" value="1"{chk("excludeFromSearch")}>Exclude from unqualified searches</label>
-<button class="primary">Save options</button></form>
+<div class="row"><div><label>{html.escape(t("Editing font"))}</label><input name="font" value="{html.escape(f.get('font', 'Arial'))}" style="width:180px"></div>
+<div><label>{html.escape(t("Size"))}</label><input type="number" name="size" min="5" max="300" value="{int(f.get('size', 20) or 20)}" style="width:90px"></div></div>
+<label>{html.escape(t("Description (shown in the empty field when adding)"))}</label><input name="description" value="{html.escape(f.get('description', ''))}">
+<label class="chk"><input type="checkbox" name="sort" value="1"{" checked" if i == sort_idx else ""}>{html.escape(t("Sort by this field in the browser"))}</label>
+<label class="chk"><input type="checkbox" name="rtl" value="1"{chk("rtl")}>{html.escape(t("Use right-to-left direction"))}</label>
+<label class="chk"><input type="checkbox" name="sticky" value="1"{chk("sticky")}>{html.escape(t("Remember last input when adding"))}</label>
+<label class="chk"><input type="checkbox" name="plainText" value="1"{chk("plainText")}>{html.escape(t("Use HTML editor by default"))}</label>
+<label class="chk"><input type="checkbox" name="collapsed" value="1"{chk("collapsed")}>{html.escape(t("Collapse by default"))}</label>
+<label class="chk"><input type="checkbox" name="excludeFromSearch" value="1"{chk("excludeFromSearch")}>{html.escape(t("Exclude from unqualified searches"))}</label>
+<button class="primary">{html.escape(t("Save options"))}</button></form>
 <form method="post" action="/notetypes/{ntid}/fields" style="margin-top:8px"
-onsubmit="return confirm('Delete field {html.escape(json.dumps(f['name'])[1:-1])} from {plural(col.models.use_count(nt), 'note')}?')">
-{hidden("delete")}<button class="danger">Delete field</button></form></details></span></div>""")
+{confirm_attr(tn("Delete field {name} from {n} note?", "Delete field {name} from {n} notes?",
+                 col.models.use_count(nt), name=f["name"]))}>
+{hidden("delete")}<button class="danger">{html.escape(t("Delete field"))}</button></form></details></span></div>""")
     return f"""{CSS}<div class="box"><div class="row" style="justify-content:space-between">
-<h2 style="margin:0">Fields for {html.escape(nt['name'])}</h2>
-<span class="row"><a class="btn" href="/notetypes/{ntid}/cards">Cards</a><a class="btn" href="/notetypes">All note types</a></span></div>
+<h2 style="margin:0">{html.escape(t("Fields for {name}", name=nt['name']))}</h2>
+<span class="row"><a class="btn" href="/notetypes/{ntid}/cards">{html.escape(t("Cards"))}</a><a class="btn" href="/notetypes">{html.escape(t("All note types"))}</a></span></div>
 {''.join(rows)}
 <form method="post" action="/notetypes/{ntid}/fields" class="row" style="margin-top:12px">
-<input type="hidden" name="op" value="add"><input name="name" placeholder="New field name" aria-label="New field name"
-style="flex:1;min-width:200px" required><button class="primary">Add field</button></form>
-<p class="muted" style="font-size:14px;margin-bottom:0">Renaming a field also updates the card templates that use it.</p></div>"""
+<input type="hidden" name="op" value="add"><input name="name" placeholder="{html.escape(t("New field name"))}" aria-label="{html.escape(t("New field name"))}"
+style="flex:1;min-width:200px" required><button class="primary">{html.escape(t("Add field"))}</button></form>
+<p class="muted" style="font-size:14px;margin-bottom:0">{html.escape(t("Renaming a field also updates the card templates that use it."))}</p></div>"""
 
 
 @router.get("/notetypes/{ntid}/fields", response_class=HTMLResponse)
@@ -241,7 +249,7 @@ def fields_page(request: Request, ntid: int):
             body = fields_html(col, get_nt(col, ntid))
         except LookupError:
             return RedirectResponse("/notetypes", 303)
-    return core.page("Fields", body, user, "settings", core.take_flash(request))
+    return core.page(t("Fields"), body, user, "settings", core.take_flash(request))
 
 
 def field_op(col, nt, form):
@@ -249,40 +257,40 @@ def field_op(col, nt, form):
     if op == "add":
         name = clean_field_name(nt, str(form.get("name", "")))
         col.models.add_field(nt, col.models.new_field(name))
-        return f"Added field “{name}”."
+        return t("Added field “{name}”.", name=name)
     try:
         f = nt["flds"][int(form.get("idx", -1))]
     except (ValueError, IndexError):
-        raise ValueError("Unknown field.")
+        raise ValueError(t("Unknown field."))
     if op == "rename":
         name = clean_field_name(nt, str(form.get("name", "")), skip=f)
         old = f["name"]
         col.models.rename_field(nt, f, name)
-        return f"Renamed “{old}” to “{name}”." if old != name else ""
+        return t("Renamed “{old}” to “{name}”.", old=old, name=name) if old != name else ""
     if op == "move":
         to = int(form.get("to", 0))
         if not 0 <= to < len(nt["flds"]):
-            raise ValueError("Unknown position.")
+            raise ValueError(t("Unknown position."))
         col.models.reposition_field(nt, f, to)
         return ""
     if op == "delete":
         if len(nt["flds"]) < 2:
-            raise ValueError("A note type needs at least one field.")
+            raise ValueError(t("A note type needs at least one field."))
         col.models.remove_field(nt, f)
-        return f"Deleted field “{f['name']}”."
+        return t("Deleted field “{name}”.", name=f['name'])
     if op == "options":
         f["font"] = str(form.get("font", "")).strip() or "Arial"
         try:
             f["size"] = max(5, min(300, int(form.get("size", 20))))
         except ValueError:
-            raise ValueError("Size must be a whole number.")
+            raise ValueError(t("Size must be a whole number."))
         f["description"] = str(form.get("description", ""))
         for key in ("rtl", "sticky", "plainText", "collapsed", "excludeFromSearch"):
             f[key] = bool(form.get(key))
         if form.get("sort"):
             col.models.set_sort_index(nt, nt["flds"].index(f))
-        return f"Saved options for “{f['name']}”."
-    raise ValueError("Unknown action.")
+        return t("Saved options for “{name}”.", name=f['name'])
+    raise ValueError(t("Unknown action."))
 
 
 @router.post("/notetypes/{ntid}/fields")
@@ -341,7 +349,8 @@ def preview_docs(col, nt, ord_, qfmt, afmt, css, nid=0, cloze=1):
     play = '<span class="replay-button">' + core.PLAY_SVG + "</span>"
     def side(text, front):
         text = re.sub(r"\[anki:play:[qa]:\d+\]", play, text)
-        box = '<center><input type="text" id="typeans" placeholder="(typing the answer)" disabled></center>'
+        box = ('<center><input type="text" id="typeans" placeholder="'
+               + html.escape(t("(typing the answer)")) + '" disabled></center>')
         text = core.TYPE_PAT.sub(box if front else "", text)
         return core.card_doc(f"<style>{css}</style>{text}", core.theme_of(col))
     return side(out.question_text, True), side(out.answer_text, False)
@@ -359,8 +368,8 @@ def cards_html(col, nt, ord_, nid=0, cloze=1, edits=None):
     cz = is_cloze(nt)
     tmpls = nt["tmpls"]
     ord_ = max(0, min(ord_, len(tmpls) - 1))
-    t = tmpls[ord_]
-    qfmt, afmt, css = (edits or (t["qfmt"], t["afmt"], nt["css"]))
+    tm = tmpls[ord_]
+    qfmt, afmt, css = (edits or (tm["qfmt"], tm["afmt"], nt["css"]))
     q, a = preview_docs(col, nt, ord_, qfmt, afmt, css, nid, cloze)
     note, blank = preview_note(col, nt, nid)
     q_nid = f"&nid={note.id}" if nid and not blank else ""
@@ -370,40 +379,50 @@ def cards_html(col, nt, ord_, nid=0, cloze=1, edits=None):
     if cz:
         nums = cloze_numbers(note)
         if cloze not in nums: nums = sorted(set(nums) | {cloze})
-        opts = "".join(f'<option value="{n}"{" selected" if n == cloze else ""}>Cloze {n}</option>' for n in nums)
-        cloze_sel = (f'<label for="cloze">Preview card</label><select id="cloze" name="cloze" style="width:auto">'
+        opts = "".join(f'<option value="{n}"{" selected" if n == cloze else ""}>{html.escape(t("Cloze {n}", n=n))}</option>'
+                       for n in nums)
+        cloze_sel = (f'<label for="cloze">{html.escape(t("Preview card"))}</label><select id="cloze" name="cloze" style="width:auto">'
                      f'{opts}</select>')
     use = col.models.template_use_count(ntid, ord_) if not cz else 0
     pos = "".join(f'<option value="{j}"{" selected" if j == ord_ else ""}>{j + 1}</option>' for j in range(len(tmpls)))
     hid = f'<input type="hidden" name="ord" value="{ord_}">'
     if cz:
-        type_ops = '<p class="muted" style="font-size:14px">Cloze note types have one card type; each cloze number makes a card.</p>'
+        type_ops = ('<p class="muted" style="font-size:14px">'
+                    + html.escape(t("Cloze note types have one card type; each cloze number makes a card.")) + '</p>')
     else:
         type_ops = f"""<div class="row">
 <form method="post" action="/notetypes/{ntid}/cards/op" class="row">{hid}<input type="hidden" name="op" value="rename">
-<input name="name" value="{html.escape(t['name'])}" aria-label="Card type name" style="width:200px" required><button>Rename</button></form>
+<input name="name" value="{html.escape(tm['name'])}" aria-label="{html.escape(t("Card type name"))}" style="width:200px" required><button>{html.escape(t("Rename"))}</button></form>
 <form method="post" action="/notetypes/{ntid}/cards/op" class="row">{hid}<input type="hidden" name="op" value="move">
-<label for="to" style="margin:0">Position</label><select id="to" name="to" style="width:auto" onchange="this.form.submit()">{pos}</select></form>
-<form method="post" action="/notetypes/{ntid}/cards/op">{hid}<input type="hidden" name="op" value="add"><button>Add card type</button></form>
-<form method="post" action="/notetypes/{ntid}/cards/op" onsubmit="return confirm('Delete this card type and its {plural(use, 'card')}?')">
-{hid}<input type="hidden" name="op" value="delete"><button class="danger">Delete card type</button></form></div>"""
-    who = "a blank note" if blank else "the note “" + html.escape(" ".join(core.strip_html(note.fields[nt["sortf"]]).split())[:40]) + "”"
+<label for="to" style="margin:0">{html.escape(t("Position"))}</label><select id="to" name="to" style="width:auto" onchange="this.form.submit()">{pos}</select></form>
+<form method="post" action="/notetypes/{ntid}/cards/op">{hid}<input type="hidden" name="op" value="add"><button>{html.escape(t("Add card type"))}</button></form>
+<form method="post" action="/notetypes/{ntid}/cards/op" {confirm_attr(tn("Delete this card type and its {n} card?", "Delete this card type and its {n} cards?", use))}>
+{hid}<input type="hidden" name="op" value="delete"><button class="danger">{html.escape(t("Delete card type"))}</button></form></div>"""
+    if blank:
+        who = html.escape(t("using a blank note"))
+    else:
+        who = html.escape(t("using the note “{text}”",
+                            text=" ".join(core.strip_html(note.fields[nt["sortf"]]).split())[:40]))
+    fields_list = html.escape(', '.join('{{' + f['name'] + '}}' for f in nt['flds']))
+    specials = "{{FrontSide}}, {{Tags}}, {{Deck}}, {{Card}}, {{type:Field}}" + (", {{cloze:Field}}" if cz else "")
+    # The lists go in after escaping (they hold braces and already-escaped names).
+    fields_hint = (html.escape(t("Fields: {fields}.", fields="\x00"), quote=False).replace("\x00", fields_list) + "\n"
+                   + html.escape(t("Also {specials}.", specials="\x00"), quote=False).replace("\x00", specials))
     return f"""{CSS}<style>main{{max-width:1240px}}</style>
-<div class="box"><div class="row" style="justify-content:space-between"><h2 style="margin:0">Cards for {html.escape(nt['name'])}</h2>
-<span class="row"><a class="btn" href="/notetypes/{ntid}/fields">Fields</a><a class="btn" href="/notetypes">All note types</a></span></div>
+<div class="box"><div class="row" style="justify-content:space-between"><h2 style="margin:0">{html.escape(t("Cards for {name}", name=nt['name']))}</h2>
+<span class="row"><a class="btn" href="/notetypes/{ntid}/fields">{html.escape(t("Fields"))}</a><a class="btn" href="/notetypes">{html.escape(t("All note types"))}</a></span></div>
 <div class="ctype" style="margin-top:12px">{types}</div><div style="margin-top:12px">{type_ops}</div></div>
 <form id="tform" method="post" action="/notetypes/{ntid}/cards">{hid}<input type="hidden" name="nid" value="{note.id if not blank else 0}">
 <div class="tgrid"><div class="box" style="margin:0">
-<label for="qfmt">Front template</label><textarea id="qfmt" name="qfmt" class="code" spellcheck="false" autocapitalize="off">{html.escape(qfmt)}</textarea>
-<label for="afmt">Back template</label><textarea id="afmt" name="afmt" class="code" spellcheck="false" autocapitalize="off">{html.escape(afmt)}</textarea>
-<label for="css">Styling (shared by all card types)</label><textarea id="css" name="css" class="code" spellcheck="false" autocapitalize="off">{html.escape(css)}</textarea>
-<p class="row" style="margin-bottom:0"><button class="primary">Save</button><a class="btn" href="/notetypes/{ntid}/cards?ord={ord_}{q_nid}">Discard changes</a></p>
-<p class="muted" style="font-size:14px;margin-bottom:0">Fields: {html.escape(', '.join('{{' + f['name'] + '}}' for f in nt['flds']))}.
-Also {{{{FrontSide}}}}, {{{{Tags}}}}, {{{{Deck}}}}, {{{{Card}}}}, {{{{type:Field}}}}{', {{cloze:Field}}' if cz else ''}.</p></div>
-<div class="box" style="margin:0"><div class="row" style="justify-content:space-between"><b>Preview</b>
-<span class="muted" style="font-size:14px">using {who}</span></div>{cloze_sel}
-<label>Front</label><iframe id="pq" class="pv" title="Front preview" srcdoc="{html.escape(q)}"></iframe>
-<label>Back</label><iframe id="pa" class="pv" title="Back preview" srcdoc="{html.escape(a)}"></iframe></div></div></form>
+<label for="qfmt">{html.escape(t("Front template"))}</label><textarea id="qfmt" name="qfmt" class="code" spellcheck="false" autocapitalize="off">{html.escape(qfmt)}</textarea>
+<label for="afmt">{html.escape(t("Back template"))}</label><textarea id="afmt" name="afmt" class="code" spellcheck="false" autocapitalize="off">{html.escape(afmt)}</textarea>
+<label for="css">{html.escape(t("Styling (shared by all card types)"))}</label><textarea id="css" name="css" class="code" spellcheck="false" autocapitalize="off">{html.escape(css)}</textarea>
+<p class="row" style="margin-bottom:0"><button class="primary">{html.escape(t("Save"))}</button><a class="btn" href="/notetypes/{ntid}/cards?ord={ord_}{q_nid}">{html.escape(t("Discard changes"))}</a></p>
+<p class="muted" style="font-size:14px;margin-bottom:0">{fields_hint}</p></div>
+<div class="box" style="margin:0"><div class="row" style="justify-content:space-between"><b>{html.escape(t("Preview"))}</b>
+<span class="muted" style="font-size:14px">{who}</span></div>{cloze_sel}
+<label>{html.escape(t("Front"))}</label><iframe id="pq" class="pv" title="{html.escape(t("Front preview"))}" srcdoc="{html.escape(q)}"></iframe>
+<label>{html.escape(t("Back"))}</label><iframe id="pa" class="pv" title="{html.escape(t("Back preview"))}" srcdoc="{html.escape(a)}"></iframe></div></div></form>
 <script>
 (function(){{const f=document.getElementById('tform');let tm=null,dirty=false;
 function fit(fr){{try{{const d=fr.contentDocument;fr.style.height=Math.max(160,d.documentElement.scrollHeight+4)+'px';}}catch(e){{}}}}
@@ -430,7 +449,7 @@ def cards_page(request: Request, ntid: int, ord: int = 0, nid: int = 0, cloze: i
             body = cards_html(col, get_nt(col, ntid), ord, nid, max(1, cloze))
         except LookupError:
             return RedirectResponse("/notetypes", 303)
-    return core.page("Cards", body, user, "settings", core.take_flash(request))
+    return core.page(t("Cards"), body, user, "settings", core.take_flash(request))
 
 
 @router.post("/notetypes/{ntid}/preview")
@@ -463,26 +482,26 @@ async def cards_save(request: Request, ntid: int):
         except LookupError:
             return RedirectResponse("/notetypes", 303)
         ord_ = max(0, min(ord_, len(nt["tmpls"]) - 1))
-        t = nt["tmpls"][ord_]
-        t["qfmt"], t["afmt"], nt["css"] = edits
+        tm = nt["tmpls"][ord_]
+        tm["qfmt"], tm["afmt"], nt["css"] = edits
         try:
             col.models.update_dict(nt)
         except Exception as e:
             # Keep what was typed so nothing is lost, as Anki keeps its dialog open.
             body = cards_html(col, get_nt(col, ntid), ord_, nid, cloze, edits=edits)
-            return core.page("Cards", body, user, "settings", "!" + clean_err(e))
-    core.set_flash(request, "Saved.")
+            return core.page(t("Cards"), body, user, "settings", "!" + clean_err(e))
+    core.set_flash(request, t("Saved."))
     return RedirectResponse(f"/notetypes/{ntid}/cards?ord={ord_}" + (f"&nid={nid}" if nid else ""), 303)
 
 
 def card_type_op(col, nt, form):
     if is_cloze(nt):
-        raise ValueError("Cloze note types can't have more card types.")
+        raise ValueError(t("Cloze note types can't have more card types."))
     tmpls = nt["tmpls"]
     ord_ = int_arg(form.get("ord"))
     if not 0 <= ord_ < len(tmpls):
-        raise ValueError("Unknown card type.")
-    t = tmpls[ord_]
+        raise ValueError(t("Unknown card type."))
+    tm = tmpls[ord_]
     op = str(form.get("op", ""))
     if op == "add":
         # Like Anki: the new card type starts as a copy of the current one.
@@ -493,28 +512,28 @@ def card_type_op(col, nt, form):
         # Anki validates when its dialog closes, so the user edits the copy first. Here each
         # action saves straight away and the engine refuses two identical fronts, so the copy
         # gets a comment naming it; edit the front to make it a real new card type.
-        new["qfmt"] = t["qfmt"].rstrip() + f"\n<!-- {new['name']}: edit this front -->"
-        new["afmt"] = t["afmt"]
+        new["qfmt"] = tm["qfmt"].rstrip() + f"\n<!-- {new['name']}: edit this front -->"
+        new["afmt"] = tm["afmt"]
         col.models.add_template(nt, new)
-        return len(tmpls) - 1, f"Added card type “{new['name']}”."
+        return len(tmpls) - 1, t("Added card type “{name}”.", name=new['name'])
     if op == "rename":
         name = str(form.get("name", "")).strip()
-        if not name: raise ValueError("Enter a name.")
-        if any(x is not t and x["name"] == name for x in tmpls):
-            raise ValueError("That name is already used.")
-        t["name"] = name
+        if not name: raise ValueError(t("Enter a name."))
+        if any(x is not tm and x["name"] == name for x in tmpls):
+            raise ValueError(t("That name is already used."))
+        tm["name"] = name
         return ord_, ""
     if op == "move":
         to = int_arg(form.get("to"), -1)
-        if not 0 <= to < len(tmpls): raise ValueError("Unknown position.")
-        col.models.reposition_template(nt, t, to)
+        if not 0 <= to < len(tmpls): raise ValueError(t("Unknown position."))
+        col.models.reposition_template(nt, tm, to)
         return to, ""
     if op == "delete":
         if len(tmpls) < 2:
-            raise ValueError("At least one card type is required.")
-        col.models.remove_template(nt, t)
-        return 0, f"Deleted card type “{t['name']}”."
-    raise ValueError("Unknown action.")
+            raise ValueError(t("At least one card type is required."))
+        col.models.remove_template(nt, tm)
+        return 0, t("Deleted card type “{name}”.", name=tm['name'])
+    raise ValueError(t("Unknown action."))
 
 
 @router.post("/notetypes/{ntid}/cards/op")
@@ -548,7 +567,7 @@ def change_html(col, nids, new_id, back, q):
     try:
         old_id = col.models.get_single_notetype_of_notes(nids)
     except Exception:
-        raise ValueError("Please select notes from only one note type.")
+        raise ValueError(t("Please select notes from only one note type."))
     old = col.models.get(old_id)
     new = col.models.get(new_id) if new_id else old
     if not new:
@@ -564,29 +583,36 @@ def change_html(col, nids, new_id, back, q):
                 f'<option value="{j}"{" selected" if current[i] == j else ""}>{html.escape(o)}</option>'
                 for j, o in enumerate(old_names))
             rows.append(f'<tr><td>{html.escape(name)}</td><td><select name="{prefix}{i}" '
-                        f'aria-label="Old {html.escape(name)}">{opts}</select></td></tr>')
+                        f'aria-label="{html.escape(t("Old {name}", name=name))}">{opts}</select></td></tr>')
         return "".join(rows)
-    fields = mapping("f", info.new_field_names, info.old_field_names, list(inp.new_fields), "(Nothing)")
+    nothing = html.escape(t("(Nothing)"))
+    fields = mapping("f", info.new_field_names, info.old_field_names, list(inp.new_fields), nothing)
     if inp.is_cloze:
-        tmpl_box = ('<p class="muted" style="font-size:14px">Cards are matched by cloze number when changing to or '
-                    'from a cloze note type.</p>')
+        tmpl_box = ('<p class="muted" style="font-size:14px">'
+                    + html.escape(t("Cards are matched by cloze number when changing to or from a cloze note type."))
+                    + '</p>')
     else:
-        tmpl_box = (f'<table><tr><th>New card type</th><th>Takes cards from</th></tr>'
-                    f'{mapping("t", info.new_template_names, info.old_template_names, list(inp.new_templates), "(Nothing)")}</table>')
+        tmpl_box = (f'<table><tr><th>{html.escape(t("New card type"))}</th><th>{html.escape(t("Takes cards from"))}</th></tr>'
+                    f'{mapping("t", info.new_template_names, info.old_template_names, list(inp.new_templates), nothing)}</table>')
     keep_q = f'<input type="hidden" name="q" value="{html.escape(q)}">' if q else \
         f'<input type="hidden" name="nids" value="{",".join(map(str, nids))}">'
     eb = html.escape(back)
-    return f"""<div class="box"><h2 style="margin-top:0">Change note type</h2>
-<p>{plural(len(nids), 'note')} of type <b>{html.escape(old['name'])}</b>.</p>
+    n = len(nids)
+    of_type = html.escape(tn("{n} note of type {name}.", "{n} notes of type {name}.", n, name="\x00")).replace(
+        "\x00", f"<b>{html.escape(old['name'])}</b>")
+    ask = tn("Change the note type of {n} note? Fields or cards set to (Nothing) will be deleted.",
+             "Change the note type of {n} notes? Fields or cards set to (Nothing) will be deleted.", n)
+    return f"""<div class="box"><h2 style="margin-top:0">{html.escape(t("Change note type"))}</h2>
+<p>{of_type}</p>
 <form method="get" action="/notetypes/change">{keep_q}<input type="hidden" name="back" value="{eb}">
-<label for="new">New note type</label><select id="new" name="new" onchange="this.form.submit()">{nt_opts}</select>
-<noscript><button>Choose</button></noscript></form>
-<form method="post" action="/notetypes/change" onsubmit="return confirm('Change the note type of {plural(len(nids), 'note')}? Fields or cards set to (Nothing) will be deleted.')">
+<label for="new">{html.escape(t("New note type"))}</label><select id="new" name="new" onchange="this.form.submit()">{nt_opts}</select>
+<noscript><button>{html.escape(t("Choose"))}</button></noscript></form>
+<form method="post" action="/notetypes/change" {confirm_attr(ask)}>
 {keep_q}<input type="hidden" name="old" value="{old_id}"><input type="hidden" name="new" value="{new['id']}">
 <input type="hidden" name="back" value="{eb}">
-<h3>Fields</h3><table><tr><th>New field</th><th>Takes content from</th></tr>{fields}</table>
-<h3>Cards</h3>{tmpl_box}
-<p class="row" style="margin-bottom:0"><button class="primary">Change note type</button><a class="btn" href="{eb}">Cancel</a></p>
+<h3>{html.escape(t("Fields"))}</h3><table><tr><th>{html.escape(t("New field"))}</th><th>{html.escape(t("Takes content from"))}</th></tr>{fields}</table>
+<h3>{html.escape(t("Cards"))}</h3>{tmpl_box}
+<p class="row" style="margin-bottom:0"><button class="primary">{html.escape(t("Change note type"))}</button><a class="btn" href="{eb}">{html.escape(t("Cancel"))}</a></p>
 </form></div>"""
 
 
@@ -599,12 +625,12 @@ def change_page(request: Request, nids: str = "", q: str = "", new: int = 0, bac
         try:
             targets = change_targets(col, nids, q)
             if not targets:
-                raise ValueError("Select some notes first.")
+                raise ValueError(t("Select some notes first."))
             body = change_html(col, targets, new, back, q)
         except Exception as e:
             core.set_flash(request, "!" + clean_err(e))
             return RedirectResponse(back, 303)
-    return core.page("Change note type", body, user, "browse", core.take_flash(request))
+    return core.page(t("Change note type"), body, user, "browse", core.take_flash(request))
 
 
 @router.post("/notetypes/change")
@@ -618,9 +644,9 @@ async def change_save(request: Request):
             nids = change_targets(col, form.get("nids", ""), str(form.get("q", "")))
             old_id, new_id = int_arg(form.get("old")), int_arg(form.get("new"))
             if not nids:
-                raise ValueError("Select some notes first.")
+                raise ValueError(t("Select some notes first."))
             if col.models.get_single_notetype_of_notes(nids) != old_id or not col.models.get(new_id):
-                raise ValueError("The notes changed meanwhile; please try again.")
+                raise ValueError(t("The notes changed meanwhile; please try again."))
             info = col.models.change_notetype_info(old_notetype_id=old_id, new_notetype_id=new_id)
             req = info.input
             n_old_f, n_old_t = len(info.old_field_names), len(info.old_template_names)
@@ -639,7 +665,8 @@ async def change_save(request: Request):
                 req.new_templates.extend(tmpls)
             req.note_ids.extend(nids)
             col.models.change_notetype_of_notes(req)
-            core.set_flash(request, f"Changed {plural(len(nids), 'note')} to “{col.models.get(new_id)['name']}”.")
+            core.set_flash(request, tn("Changed {n} note to “{name}”.", "Changed {n} notes to “{name}”.", len(nids),
+                                       name=col.models.get(new_id)['name']))
         except Exception as e:
             core.set_flash(request, "!" + clean_err(e))
     return RedirectResponse(back, 303)

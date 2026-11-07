@@ -12,7 +12,7 @@ sync with desktop Anki and AnkiDroid. Open/closed state of decks and tags is sto
 engine (the deck's browser-collapsed flag and the tag's collapsed flag, as desktop Anki);
 the sections and note types remember it in the browser (localStorage).
 """
-import html, re
+import html, json, re
 from urllib.parse import quote
 
 from fastapi import APIRouter, Request
@@ -22,18 +22,25 @@ from anki.collection import SearchNode
 from anki.decks import DeckCollapseScope
 
 import app as core
+from flashcards.i18n import t, tn, N_
 
 router = APIRouter()
 SAVED_KEY = "savedFilters"   # Anki's config key: {name: search}
 MAX_NAME = 100
 
-TODAY = [("Added today", SearchNode(added_in_days=1)),
-         ("Edited today", SearchNode(edited_in_days=1)),
-         ("Studied today", SearchNode(rated=SearchNode.Rated(days=1))),
-         ("Again today", SearchNode(rated=SearchNode.Rated(days=1, rating=SearchNode.RATING_AGAIN)))]
-STATES = [("New", SearchNode.CARD_STATE_NEW), ("Learning", SearchNode.CARD_STATE_LEARN),
-          ("Review", SearchNode.CARD_STATE_REVIEW), ("Suspended", SearchNode.CARD_STATE_SUSPENDED),
-          ("Buried", SearchNode.CARD_STATE_BURIED)]
+# Labels are marked with N_ and translated where they are shown.
+TODAY = [(N_("Added today"), SearchNode(added_in_days=1)),
+         (N_("Edited today"), SearchNode(edited_in_days=1)),
+         (N_("Studied today"), SearchNode(rated=SearchNode.Rated(days=1))),
+         (N_("Again today"), SearchNode(rated=SearchNode.Rated(days=1, rating=SearchNode.RATING_AGAIN)))]
+STATES = [(N_("New"), SearchNode.CARD_STATE_NEW), (N_("Learning"), SearchNode.CARD_STATE_LEARN),
+          (N_("Review"), SearchNode.CARD_STATE_REVIEW), (N_("Suspended"), SearchNode.CARD_STATE_SUSPENDED),
+          (N_("Buried"), SearchNode.CARD_STATE_BURIED)]
+
+
+def esc(s):
+    """Escape translated text for an HTML text node (quotes left alone, so English output is unchanged)."""
+    return html.escape(s, quote=False)
 # Anki's flag number (card.flags) -> SearchNode flag value (the enum is shifted by FLAG_NONE/FLAG_ANY).
 FLAG_NODE = {0: SearchNode.FLAG_NONE, 1: SearchNode.FLAG_RED, 2: SearchNode.FLAG_ORANGE, 3: SearchNode.FLAG_GREEN,
              4: SearchNode.FLAG_BLUE, 5: SearchNode.FLAG_PINK, 6: SearchNode.FLAG_TURQUOISE, 7: SearchNode.FLAG_PURPLE}
@@ -80,7 +87,7 @@ class Tree:
                     f'{cur}>{icon}{label}</a>')
         if kids:
             btn = (f'<button type="button" class="sbt" {toggle} aria-expanded="{"true" if open_ else "false"}" '
-                   f'aria-label="Show or hide">▾</button>')
+                   f'aria-label="{html.escape(t("Show or hide"))}">▾</button>')
         else:
             btn = '<span class="sbt"></span>'
         row = f'<div class="sbrow{" on" if on else ""}">{btn}{link}{menu}</div>'
@@ -88,7 +95,7 @@ class Tree:
         return f'<div class="sbn{" shut" if not open_ else ""}{(" " + cls) if cls else ""}">{row}{kid}</div>'
 
     def section(self, key, title, inner):
-        return self.item(f"<b>{html.escape(title)}</b>", None, kids=inner or '<p class="sbempty">None</p>',
+        return self.item(f"<b>{html.escape(title)}</b>", None, kids=inner or f'<p class="sbempty">{esc(t("None"))}</p>',
                          toggle=f'data-local="sec:{key}"', cls="sbsec")
 
     def search(self, *nodes):
@@ -97,67 +104,76 @@ class Tree:
 
 def menu_btn(kind, name):
     return (f'<button type="button" class="sbm" data-kind="{kind}" data-name="{html.escape(name)}" '
-            f'aria-label="More for {html.escape(name)}">⋯</button>')
+            f'aria-label="{html.escape(t("More for {name}", name=name))}">⋯</button>')
 
 
 def sidebar_html(col, q):
-    t = Tree(col, q)
+    tree = Tree(col, q)
     esc = html.escape
     # Saved searches
     saved = sorted(saved_searches(col).items(), key=lambda kv: kv[0].lower())
-    inner = "".join(t.item(esc(name), normalize(col, s), menu=menu_btn("saved", name)) for name, s in saved)
-    inner += ('<button type="button" class="sbact" data-op="save">＋ Save current search</button>'
-              if q.strip() else '<p class="sbempty">Search for something, then save it here.</p>')
-    parts = [t.section("saved", "Saved searches", inner)]
+    inner = "".join(tree.item(esc(name), normalize(col, s), menu=menu_btn("saved", name)) for name, s in saved)
+    inner += (f'<button type="button" class="sbact" data-op="save">＋ {esc(t("Save current search"), quote=False)}</button>'
+              if q.strip() else f'<p class="sbempty">{esc(t("Search for something, then save it here."), quote=False)}</p>')
+    parts = [tree.section("saved", t("Saved searches"), inner)]
     # Today
-    parts.append(t.section("today", "Today", "".join(t.item(n, t.search(s)) for n, s in TODAY)))
+    parts.append(tree.section("today", t("Today"), "".join(tree.item(esc(t(n), quote=False), tree.search(s))
+                                                           for n, s in TODAY)))
     # Flags (custom names from Anki's Rename Flag, if any)
     labels = col.get_config("flagLabels", {}) or {}
-    flags = "".join(t.item(esc(str(labels.get(str(n)) or name)) if n else "No flag", t.search(SearchNode(flag=FLAG_NODE[n])),
-                           icon=core.flag_dot(n) + " " if n else "")
+    flags = "".join(tree.item(esc(str(labels.get(str(n)) or t(name))) if n else esc(t("No flag"), quote=False),
+                              tree.search(SearchNode(flag=FLAG_NODE[n])), icon=core.flag_dot(n) + " " if n else "")
                     for n, name, _ in core.FLAGS[1:] + core.FLAGS[:1])
-    parts.append(t.section("flags", "Flags", flags))
+    parts.append(tree.section("flags", t("Flags"), flags))
     # Card state
-    parts.append(t.section("state", "Card state",
-                           "".join(t.item(n, t.search(SearchNode(card_state=s))) for n, s in STATES)))
+    parts.append(tree.section("state", t("Card state"),
+                              "".join(tree.item(esc(t(n), quote=False), tree.search(SearchNode(card_state=s)))
+                                      for n, s in STATES)))
 
     # Decks (engine tree; its collapsed flag is the browser one)
     def decks(node, prefix):
         out = []
         for ch in node.children:
             full = f"{prefix}::{ch.name}" if prefix else ch.name
-            out.append(t.item(esc(ch.name), t.search(SearchNode(deck=full)), kids=decks(ch, full),
-                              open_=not ch.collapsed, toggle=f'data-deck="{ch.deck_id}"'))
+            out.append(tree.item(esc(ch.name), tree.search(SearchNode(deck=full)), kids=decks(ch, full),
+                                 open_=not ch.collapsed, toggle=f'data-deck="{ch.deck_id}"'))
         return "".join(out)
-    parts.append(t.section("decks", "Decks", decks(col.decks.deck_tree(), "")))
+    parts.append(tree.section("decks", t("Decks"), decks(col.decks.deck_tree(), "")))
     # Note types and their card types
     nts = []
     for nt in sorted(col.models.all_names_and_ids(), key=lambda n: n.name.lower()):
         m = col.models.get(nt.id)
         if not m:
             continue
-        kids = "".join(t.item(esc(tm["name"]), t.search(SearchNode(note=nt.name), SearchNode(template=tm["ord"])))
+        kids = "".join(tree.item(esc(tm["name"]), tree.search(SearchNode(note=nt.name), SearchNode(template=tm["ord"])))
                        for tm in m["tmpls"])
-        nts.append(t.item(esc(nt.name), t.search(SearchNode(note=nt.name)), kids=kids, open_=False,
-                          toggle=f'data-local="nt:{nt.id}"'))
-    parts.append(t.section("notetypes", "Note types", "".join(nts)))
+        nts.append(tree.item(esc(nt.name), tree.search(SearchNode(note=nt.name)), kids=kids, open_=False,
+                             toggle=f'data-local="nt:{nt.id}"'))
+    parts.append(tree.section("notetypes", t("Note types"), "".join(nts)))
 
     # Tags (engine tree on ::, collapsed flags from the engine)
     def tags(node, prefix):
         out = []
         for ch in node.children:
             full = f"{prefix}::{ch.name}" if prefix else ch.name
-            out.append(t.item(esc(ch.name), tag_search(col, full), kids=tags(ch, full), open_=not ch.collapsed,
-                              toggle=f'data-tag="{esc(full)}"', menu=menu_btn("tag", full)))
+            out.append(tree.item(esc(ch.name), tag_search(col, full), kids=tags(ch, full), open_=not ch.collapsed,
+                                 toggle=f'data-tag="{esc(full)}"', menu=menu_btn("tag", full)))
         return "".join(out)
     inner = tags(col.tags.tree(), "")
-    inner += '<button type="button" class="sbact" data-op="clear_tags">Clear unused tags</button>'
-    parts.append(t.section("tags", "Tags", inner))
-    return f"""<aside class="sb" aria-label="Sidebar"><div class="sbhead"><b>Sidebar</b>
-<button type="button" class="sbclose" aria-label="Close sidebar">✕</button></div>{''.join(parts)}
-<p class="sbhint muted">Ctrl-click: add to the search (AND). Shift-click: OR.</p></aside>
-<div class="sbback"></div><div class="sbpop" hidden><button type="button" data-do="rename">Rename…</button>
-<button type="button" data-do="delete" class="danger">Delete…</button></div>
+    inner += f'<button type="button" class="sbact" data-op="clear_tags">{esc(t("Clear unused tags"), quote=False)}</button>'
+    parts.append(tree.section("tags", t("Tags"), inner))
+    # Words used by the script (prompts and confirmations), read from data-l.
+    words = {"saveName": t("Name for this saved search:"),
+             "clearTags": t("Remove tags that no note uses any more?"),
+             "renameTag": t("Rename tag (use :: for a parent tag):"),
+             "renameSaved": t("Rename saved search:"),
+             "deleteTag": t("Remove the tag “{name}” (and the tags under it) from every note?"),
+             "deleteSaved": t("Delete the saved search “{name}”?")}
+    return f"""<aside class="sb" aria-label="{esc(t("Sidebar"))}" data-l="{esc(json.dumps(words))}"><div class="sbhead"><b>{esc(t("Sidebar"), quote=False)}</b>
+<button type="button" class="sbclose" aria-label="{esc(t("Close sidebar"))}">✕</button></div>{''.join(parts)}
+<p class="sbhint muted">{esc(t("Ctrl-click: add to the search (AND). Shift-click: OR."), quote=False)}</p></aside>
+<div class="sbback"></div><div class="sbpop" hidden><button type="button" data-do="rename">{esc(t("Rename…"), quote=False)}</button>
+<button type="button" data-do="delete" class="danger">{esc(t("Delete…"), quote=False)}</button></div>
 <form class="sbform" method="post" action="/browse/sidebar" style="display:none"><input type="hidden" name="op">
 <input type="hidden" name="name"><input type="hidden" name="new"><input type="hidden" name="q" value="{esc(q)}"></form>"""
 
@@ -195,7 +211,7 @@ transform:translateX(-105%);transition:transform .2s;visibility:hidden}
 
 JS = """<script>(function(){
 const sb=document.querySelector('.sb'),back=document.querySelector('.sbback'),pop=document.querySelector('.sbpop'),
- form=document.querySelector('.sbform'),F=n=>form.elements[n],Q=F('q').value;
+ form=document.querySelector('.sbform'),F=n=>form.elements[n],Q=F('q').value,L=JSON.parse(sb.dataset.l||'{}');
 const store={get:k=>{try{return localStorage.getItem('fcSb:'+k)}catch(e){return null}},
  set:(k,v)=>{try{localStorage.setItem('fcSb:'+k,v)}catch(e){}}};
 // sections and note types: open/closed remembered in this browser
@@ -226,16 +242,16 @@ sb.addEventListener('click',e=>{
   const r=m.getBoundingClientRect();pop.style.top=Math.min(r.bottom,innerHeight-pop.offsetHeight-8)+'px';
   pop.style.left=Math.max(8,Math.min(r.right-pop.offsetWidth,innerWidth-pop.offsetWidth-8))+'px';return;}
  const act=e.target.closest('.sbact');
- if(act){if(act.dataset.op==='save'){const n=prompt('Name for this saved search:',Q);if(n&&n.trim())post('save',n.trim());}
-  else if(confirm('Remove tags that no note uses any more?'))post('clear_tags');}
+ if(act){if(act.dataset.op==='save'){const n=prompt(L.saveName,Q);if(n&&n.trim())post('save',n.trim());}
+  else if(confirm(L.clearTags))post('clear_tags');}
 });
 sb.addEventListener('scroll',()=>{pop.hidden=true;},{passive:true});
 document.addEventListener('click',e=>{if(!pop.hidden&&!pop.contains(e.target))pop.hidden=true;});
 pop.addEventListener('click',e=>{const b=e.target.closest('button');if(!b||!menuFor)return;pop.hidden=true;
  const kind=menuFor.dataset.kind,name=menuFor.dataset.name;
- if(b.dataset.do==='rename'){const n=prompt(kind==='tag'?'Rename tag (use :: for a parent tag):':'Rename saved search:',name);
+ if(b.dataset.do==='rename'){const n=prompt(kind==='tag'?L.renameTag:L.renameSaved,name);
   if(n&&n.trim()&&n.trim()!==name)post(kind==='tag'?'rename_tag':'rename_saved',name,n.trim());}
- else if(confirm(kind==='tag'?'Remove the tag “'+name+'” (and the tags under it) from every note?':'Delete the saved search “'+name+'”?'))
+ else if(confirm((kind==='tag'?L.deleteTag:L.deleteSaved).split('{name}').join(name)))
   post(kind==='tag'?'delete_tag':'delete_saved',name);});
 })();</script>"""
 
@@ -245,7 +261,17 @@ def layout(side, main_html):
     return f'<style>{CSS}</style><div class="bwrap">{side}<div class="bmain">{main_html}</div></div>{JS}'
 
 
-OPEN_BUTTON = '<button type="button" class="sbopen" aria-label="Open the sidebar">☰ Sidebar</button>'
+def open_button():
+    """The ☰ Sidebar button for narrow screens (in the current language)."""
+    return (f'<button type="button" class="sbopen" aria-label="{html.escape(t("Open the sidebar"))}">'
+            f'☰ {esc(t("Sidebar"))}</button>')
+
+
+def __getattr__(name):
+    # `OPEN_BUTTON` was a constant; it is now built per request so it follows the language.
+    if name == "OPEN_BUTTON":
+        return open_button()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 # ---------- actions ----------
@@ -256,44 +282,50 @@ def run(col, form):
     new = str(form.get("new", "")).strip()
     q = str(form.get("q", ""))
     if op == "save":
-        if not q.strip(): raise ValueError("Search for something first, then save it.")
-        if not name or len(name) > MAX_NAME: raise ValueError(f"Give the search a name (up to {MAX_NAME} characters).")
+        if not q.strip(): raise ValueError(t("Search for something first, then save it."))
+        if not name or len(name) > MAX_NAME:
+            raise ValueError(t("Give the search a name (up to {n} characters).", n=MAX_NAME))
         search = col.build_search_string(q)   # raises on a search the engine can't read
         saved = saved_searches(col)
         replaced = name in saved
         saved[name] = search
         col.set_config(SAVED_KEY, saved)
-        return (f"Saved search “{name}” {'updated' if replaced else 'added'}.", None)
+        if replaced:
+            return (t("Saved search “{name}” updated.", name=name), None)
+        return (t("Saved search “{name}” added.", name=name), None)
     if op == "rename_saved":
         saved = saved_searches(col)
-        if name not in saved: raise ValueError("That saved search no longer exists.")
-        if not new or len(new) > MAX_NAME: raise ValueError(f"Enter a new name (up to {MAX_NAME} characters).")
-        if new in saved and new != name: raise ValueError(f"There is already a saved search called “{new}”.")
+        if name not in saved: raise ValueError(t("That saved search no longer exists."))
+        if not new or len(new) > MAX_NAME:
+            raise ValueError(t("Enter a new name (up to {n} characters).", n=MAX_NAME))
+        if new in saved and new != name:
+            raise ValueError(t("There is already a saved search called “{name}”.", name=new))
         saved = {(new if k == name else k): v for k, v in saved.items()}
         col.set_config(SAVED_KEY, saved)
-        return (f"Renamed to “{new}”.", None)
+        return (t("Renamed to “{name}”.", name=new), None)
     if op == "delete_saved":
         saved = saved_searches(col)
-        if saved.pop(name, None) is None: raise ValueError("That saved search no longer exists.")
+        if saved.pop(name, None) is None: raise ValueError(t("That saved search no longer exists."))
         col.set_config(SAVED_KEY, saved)
-        return (f"Saved search “{name}” deleted.", None)
+        return (t("Saved search “{name}” deleted.", name=name), None)
     if op == "rename_tag":
         new = new.strip(":")
-        if not name: raise ValueError("No tag chosen.")
+        if not name: raise ValueError(t("No tag chosen."))
         if not new or any(c.isspace() for c in new):
-            raise ValueError("Tag names can't be empty or contain spaces.")
+            raise ValueError(t("Tag names can't be empty or contain spaces."))
         n = col.tags.rename(name, new).count
         after = tag_search(col, new) if normalize(col, q) == tag_search(col, name) else None
-        return (f"Tag “{name}” renamed to “{new}” on {n} note{'' if n == 1 else 's'}.", after)
+        return (tn("Tag “{old}” renamed to “{new}” on {n} note.", "Tag “{old}” renamed to “{new}” on {n} notes.",
+                   n, old=name, new=new), after)
     if op == "delete_tag":
-        if not name: raise ValueError("No tag chosen.")
+        if not name: raise ValueError(t("No tag chosen."))
         n = col.tags.remove(name).count
         after = "" if normalize(col, q) == tag_search(col, name) else None
-        return (f"Tag “{name}” removed from {n} note{'' if n == 1 else 's'}.", after)
+        return (tn("Tag “{name}” removed from {n} note.", "Tag “{name}” removed from {n} notes.", n, name=name), after)
     if op == "clear_tags":
         n = col.tags.clear_unused_tags().count
-        return (f"{n} unused tag{'' if n == 1 else 's'} cleared." if n else "No unused tags.", None)
-    raise ValueError("Unknown sidebar action.")
+        return (tn("{n} unused tag cleared.", "{n} unused tags cleared.", n) if n else t("No unused tags."), None)
+    raise ValueError(t("Unknown sidebar action."))
 
 
 @router.post("/browse/sidebar")
@@ -323,6 +355,6 @@ async def sidebar_action(request: Request):
             msg, after = run(col, form)
             if after is not None: q = after
         except Exception as e:  # noqa: BLE001
-            msg = "!" + (re.sub(r"[\u2068\u2069]", "", str(e)) or "That did not work.")
+            msg = "!" + (re.sub(r"[\u2068\u2069]", "", str(e)) or t("That did not work."))
     core.set_flash(request, msg)
     return RedirectResponse(core.browse_url(q), 303)

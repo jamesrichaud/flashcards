@@ -14,61 +14,62 @@ from anki.decks import UpdateDeckConfigs
 from anki import deck_config_pb2
 
 import app as core
+from flashcards.i18n import t, tn, N_
 
 router = APIRouter()
 DC = deck_config_pb2.DeckConfig
 Cfg = DC.Config
 Mode = deck_config_pb2.UpdateDeckConfigsMode
 
-# ---------- choice lists (labels as in Anki's English UI) ----------
-INSERT_ORDER = [(Cfg.NEW_CARD_INSERT_ORDER_DUE, "Sequential (oldest cards first)"),
-                (Cfg.NEW_CARD_INSERT_ORDER_RANDOM, "Random")]
-GATHER = [(Cfg.NEW_CARD_GATHER_PRIORITY_DECK, "Deck"),
-          (Cfg.NEW_CARD_GATHER_PRIORITY_DECK_THEN_RANDOM_NOTES, "Deck, then random notes"),
-          (Cfg.NEW_CARD_GATHER_PRIORITY_LOWEST_POSITION, "Ascending position"),
-          (Cfg.NEW_CARD_GATHER_PRIORITY_HIGHEST_POSITION, "Descending position"),
-          (Cfg.NEW_CARD_GATHER_PRIORITY_RANDOM_NOTES, "Random notes"),
-          (Cfg.NEW_CARD_GATHER_PRIORITY_RANDOM_CARDS, "Random cards")]
-SORT = [(Cfg.NEW_CARD_SORT_ORDER_TEMPLATE, "Card type, then order gathered"),
-        (Cfg.NEW_CARD_SORT_ORDER_NO_SORT, "Order gathered"),
-        (Cfg.NEW_CARD_SORT_ORDER_TEMPLATE_THEN_RANDOM, "Card type, then random"),
-        (Cfg.NEW_CARD_SORT_ORDER_RANDOM_NOTE_THEN_TEMPLATE, "Random note, then card type"),
-        (Cfg.NEW_CARD_SORT_ORDER_RANDOM_CARD, "Random")]
-MIX = [(Cfg.REVIEW_MIX_MIX_WITH_REVIEWS, "Mix with reviews"),
-       (Cfg.REVIEW_MIX_AFTER_REVIEWS, "Show after reviews"),
-       (Cfg.REVIEW_MIX_BEFORE_REVIEWS, "Show before reviews")]
-REVIEW_ORDER = [(Cfg.REVIEW_CARD_ORDER_DAY, "Due date, then random"),
-                (Cfg.REVIEW_CARD_ORDER_DAY_THEN_DECK, "Due date, then deck"),
-                (Cfg.REVIEW_CARD_ORDER_DECK_THEN_DAY, "Deck, then due date"),
-                (Cfg.REVIEW_CARD_ORDER_INTERVALS_ASCENDING, "Ascending intervals"),
-                (Cfg.REVIEW_CARD_ORDER_INTERVALS_DESCENDING, "Descending intervals"),
-                (Cfg.REVIEW_CARD_ORDER_EASE_ASCENDING, "Ascending ease / difficulty"),
-                (Cfg.REVIEW_CARD_ORDER_EASE_DESCENDING, "Descending ease / difficulty"),
-                (Cfg.REVIEW_CARD_ORDER_RETRIEVABILITY_ASCENDING, "Ascending retrievability"),
-                (Cfg.REVIEW_CARD_ORDER_RETRIEVABILITY_DESCENDING, "Descending retrievability"),
-                (Cfg.REVIEW_CARD_ORDER_RELATIVE_OVERDUENESS, "Relative overdueness"),
-                (Cfg.REVIEW_CARD_ORDER_RANDOM, "Random"),
-                (Cfg.REVIEW_CARD_ORDER_ADDED, "Order added"),
-                (Cfg.REVIEW_CARD_ORDER_REVERSE_ADDED, "Reverse order added")]
-LEECH = [(Cfg.LEECH_ACTION_SUSPEND, "Suspend card"), (Cfg.LEECH_ACTION_TAG_ONLY, "Tag only")]
+# ---------- choice lists (labels as in Anki's English UI; translated where shown) ----------
+INSERT_ORDER = [(Cfg.NEW_CARD_INSERT_ORDER_DUE, N_("Sequential (oldest cards first)")),
+                (Cfg.NEW_CARD_INSERT_ORDER_RANDOM, N_("Random"))]
+GATHER = [(Cfg.NEW_CARD_GATHER_PRIORITY_DECK, N_("Deck")),
+          (Cfg.NEW_CARD_GATHER_PRIORITY_DECK_THEN_RANDOM_NOTES, N_("Deck, then random notes")),
+          (Cfg.NEW_CARD_GATHER_PRIORITY_LOWEST_POSITION, N_("Ascending position")),
+          (Cfg.NEW_CARD_GATHER_PRIORITY_HIGHEST_POSITION, N_("Descending position")),
+          (Cfg.NEW_CARD_GATHER_PRIORITY_RANDOM_NOTES, N_("Random notes")),
+          (Cfg.NEW_CARD_GATHER_PRIORITY_RANDOM_CARDS, N_("Random cards"))]
+SORT = [(Cfg.NEW_CARD_SORT_ORDER_TEMPLATE, N_("Card type, then order gathered")),
+        (Cfg.NEW_CARD_SORT_ORDER_NO_SORT, N_("Order gathered")),
+        (Cfg.NEW_CARD_SORT_ORDER_TEMPLATE_THEN_RANDOM, N_("Card type, then random")),
+        (Cfg.NEW_CARD_SORT_ORDER_RANDOM_NOTE_THEN_TEMPLATE, N_("Random note, then card type")),
+        (Cfg.NEW_CARD_SORT_ORDER_RANDOM_CARD, N_("Random"))]
+MIX = [(Cfg.REVIEW_MIX_MIX_WITH_REVIEWS, N_("Mix with reviews")),
+       (Cfg.REVIEW_MIX_AFTER_REVIEWS, N_("Show after reviews")),
+       (Cfg.REVIEW_MIX_BEFORE_REVIEWS, N_("Show before reviews"))]
+REVIEW_ORDER = [(Cfg.REVIEW_CARD_ORDER_DAY, N_("Due date, then random")),
+                (Cfg.REVIEW_CARD_ORDER_DAY_THEN_DECK, N_("Due date, then deck")),
+                (Cfg.REVIEW_CARD_ORDER_DECK_THEN_DAY, N_("Deck, then due date")),
+                (Cfg.REVIEW_CARD_ORDER_INTERVALS_ASCENDING, N_("Ascending intervals")),
+                (Cfg.REVIEW_CARD_ORDER_INTERVALS_DESCENDING, N_("Descending intervals")),
+                (Cfg.REVIEW_CARD_ORDER_EASE_ASCENDING, N_("Ascending ease / difficulty")),
+                (Cfg.REVIEW_CARD_ORDER_EASE_DESCENDING, N_("Descending ease / difficulty")),
+                (Cfg.REVIEW_CARD_ORDER_RETRIEVABILITY_ASCENDING, N_("Ascending retrievability")),
+                (Cfg.REVIEW_CARD_ORDER_RETRIEVABILITY_DESCENDING, N_("Descending retrievability")),
+                (Cfg.REVIEW_CARD_ORDER_RELATIVE_OVERDUENESS, N_("Relative overdueness")),
+                (Cfg.REVIEW_CARD_ORDER_RANDOM, N_("Random")),
+                (Cfg.REVIEW_CARD_ORDER_ADDED, N_("Order added")),
+                (Cfg.REVIEW_CARD_ORDER_REVERSE_ADDED, N_("Reverse order added"))]
+LEECH = [(Cfg.LEECH_ACTION_SUSPEND, N_("Suspend card")), (Cfg.LEECH_ACTION_TAG_ONLY, N_("Tag only"))]
 
 # Plain number fields: form name -> (label, kind, min, max, help)
 INT, FLOAT = int, float
 NUMBERS = {
-    "new_per_day": ("New cards/day", INT, 0, 9999, ""),
-    "reviews_per_day": ("Maximum reviews/day", INT, 0, 9999, ""),
-    "graduating_interval_good": ("Graduating interval (days)", INT, 1, 36500, ""),
-    "graduating_interval_easy": ("Easy interval (days)", INT, 1, 36500, ""),
-    "minimum_lapse_interval": ("Minimum interval (days)", INT, 1, 36500, ""),
-    "leech_threshold": ("Leech threshold (lapses)", INT, 1, 9999, ""),
-    "maximum_review_interval": ("Maximum interval (days)", INT, 1, 36500, ""),
-    "initial_ease": ("Starting ease", FLOAT, 1.31, 5.0, "SM-2 only. 2.50 = 250%."),
-    "easy_multiplier": ("Easy bonus", FLOAT, 1.0, 5.0, "SM-2 only."),
-    "hard_multiplier": ("Hard interval", FLOAT, 0.5, 1.3, "SM-2 only."),
-    "lapse_multiplier": ("New interval (after a lapse)", FLOAT, 0.0, 1.0, "SM-2 only."),
-    "interval_multiplier": ("Interval modifier", FLOAT, 0.5, 2.0, "SM-2 only."),
-    "desired_retention": ("Desired retention", FLOAT, 0.7, 0.99, "FSRS only."),
-    "cap_answer_time_to_secs": ("Maximum answer seconds", INT, 30, 600, ""),
+    "new_per_day": (N_("New cards/day"), INT, 0, 9999, ""),
+    "reviews_per_day": (N_("Maximum reviews/day"), INT, 0, 9999, ""),
+    "graduating_interval_good": (N_("Graduating interval (days)"), INT, 1, 36500, ""),
+    "graduating_interval_easy": (N_("Easy interval (days)"), INT, 1, 36500, ""),
+    "minimum_lapse_interval": (N_("Minimum interval (days)"), INT, 1, 36500, ""),
+    "leech_threshold": (N_("Leech threshold (lapses)"), INT, 1, 9999, ""),
+    "maximum_review_interval": (N_("Maximum interval (days)"), INT, 1, 36500, ""),
+    "initial_ease": (N_("Starting ease"), FLOAT, 1.31, 5.0, N_("SM-2 only. 2.50 = 250%.")),
+    "easy_multiplier": (N_("Easy bonus"), FLOAT, 1.0, 5.0, N_("SM-2 only.")),
+    "hard_multiplier": (N_("Hard interval"), FLOAT, 0.5, 1.3, N_("SM-2 only.")),
+    "lapse_multiplier": (N_("New interval (after a lapse)"), FLOAT, 0.0, 1.0, N_("SM-2 only.")),
+    "interval_multiplier": (N_("Interval modifier"), FLOAT, 0.5, 2.0, N_("SM-2 only.")),
+    "desired_retention": (N_("Desired retention"), FLOAT, 0.7, 0.99, N_("FSRS only.")),
+    "cap_answer_time_to_secs": (N_("Maximum answer seconds"), INT, 30, 600, ""),
 }
 CHOICES = {"new_card_insert_order": INSERT_ORDER, "new_card_gather_priority": GATHER,
            "new_card_sort_order": SORT, "new_mix": MIX, "interday_learning_mix": MIX,
@@ -87,7 +88,7 @@ def parse_steps(text):
     for part in text.replace(",", " ").split():
         m = re.fullmatch(r"(\d+(?:\.\d+)?)([smhd]?)", part.strip().lower())
         if not m or float(m.group(1)) <= 0:
-            raise ValueError(f"“{part}” is not a valid step. Use values like 1m 10m 1h 1d.")
+            raise ValueError(t("“{part}” is not a valid step. Use values like 1m 10m 1h 1d.", part=part))
         steps.append(float(m.group(1)) * UNITS[m.group(2) or "m"])
     return steps
 
@@ -111,7 +112,7 @@ def parse_params(text):
     try:
         return [float(x) for x in re.split(r"[,\s]+", text.strip()) if x]
     except ValueError:
-        raise ValueError("FSRS parameters must be numbers separated by commas.")
+        raise ValueError(t("FSRS parameters must be numbers separated by commas."))
 
 
 # ---------- engine helpers ----------
@@ -150,16 +151,16 @@ def options_url(did, preset=0):
 
 # ---------- page ----------
 def sel(name, choices, value):
-    opts = "".join(f'<option value="{v}"{" selected" if v == value else ""}>{html.escape(t)}</option>'
-                   for v, t in choices)
+    opts = "".join(f'<option value="{v}"{" selected" if v == value else ""}>{html.escape(t(label))}</option>'
+                   for v, label in choices)
     return f'<select name="{name}" id="{name}">{opts}</select>'
 
 def num(name, value, c):
     label, kind, lo, hi, helptext = NUMBERS[name]
     step = "1" if kind is INT else "0.01"
     shown = int(value) if kind is INT else round(value, 4)
-    h = f'<div class="muted" style="font-size:13px">{helptext}</div>' if helptext else ""
-    return (f'<div class="opt"><label for="{name}">{label}</label><input id="{name}" name="{name}" '
+    h = f'<div class="muted" style="font-size:13px">{t(helptext)}</div>' if helptext else ""
+    return (f'<div class="opt"><label for="{name}">{t(label)}</label><input id="{name}" name="{name}" '
             f'type="number" inputmode="decimal" step="{step}" min="{lo}" max="{hi}" value="{shown}">{h}</div>')
 
 def check(name, label, on):
@@ -189,18 +190,26 @@ def options_html(col, did, preset):
     uses = {x.config.id: x.use_count for x in data.all_config}
     presets = "".join(
         f'<option value="{x.config.id}"{" selected" if x.config.id == conf.id else ""}>'
-        f'{html.escape(x.config.name)} (used by {x.use_count} deck{"s" if x.use_count != 1 else ""})</option>'
+        + tn("{name} (used by {n} deck)", "{name} (used by {n} decks)", x.use_count,
+             name=html.escape(x.config.name)) + '</option>'
         for x in sorted(data.all_config, key=lambda x: x.config.name.lower()))
     not_used_here = conf.id != deck_conf_id
-    switch_note = (f'<p class="flash" style="margin:12px 0 0">Saving will switch this deck to the preset '
-                   f'“{html.escape(conf.name)}”.</p>' if not_used_here else "")
+    switch_note = ('<p class="flash" style="margin:12px 0 0">'
+                   + t("Saving will switch this deck to the preset “{name}”.", name=html.escape(conf.name))
+                   + '</p>' if not_used_here else "")
     shared = uses.get(conf.id, 0) - (0 if not_used_here else 1)
-    shared_note = (f'<p class="muted" style="font-size:14px;margin:8px 0 0">Changes also affect {shared} other '
-                   f'deck{"s" if shared != 1 else ""} using this preset.</p>' if shared > 0 else "")
+    shared_note = ('<p class="muted" style="font-size:14px;margin:8px 0 0">'
+                   + tn("Changes also affect {n} other deck using this preset.",
+                        "Changes also affect {n} other decks using this preset.", shared)
+                   + '</p>' if shared > 0 else "")
     lim_new = str(lim.new) if lim.HasField("new") else ""
     lim_rev = str(lim.review) if lim.HasField("review") else ""
     fsrs = data.fsrs
-    sm2_note = '<p class="muted" style="font-size:14px">FSRS is on, so these are not used.</p>' if fsrs else ""
+    sm2_note = ('<p class="muted" style="font-size:14px">' + t("FSRS is on, so these are not used.") + '</p>'
+                if fsrs else "")
+    del_confirm = html.escape(json.dumps(t("Delete the preset “{name}”? Decks using it will go back to Default.",
+                                           name=conf.name)), quote=True)
+    use_preset = html.escape(t("Use preset"))
     ignore_date = c.ignore_revlogs_before_date
     default_search = f'preset:"{conf.name}" -is:suspended'
     has_children = bool(col.decks.children(did))
@@ -208,89 +217,89 @@ def options_html(col, did, preset):
 
     body = f"""{OPT_CSS}
 <p><a href="/deck/{did}">← {name}</a></p>
-<h2 style="margin:4px 0 14px">Options for {name}</h2>
-<div class="box"><h3>Preset</h3>
-<div class="row"><select id="presetpick" style="flex:1;min-width:220px" aria-label="Preset"
+<h2 style="margin:4px 0 14px">{t("Options for {name}", name=name)}</h2>
+<div class="box"><h3>{t("Preset")}</h3>
+<div class="row"><select id="presetpick" style="flex:1;min-width:220px" aria-label="{html.escape(t("Preset"))}"
 onchange="location='/deck/{did}/options?preset='+this.value">{presets}</select></div>
 {switch_note}{shared_note}
 <div class="row" style="margin-top:12px">
 <form method="post" action="/deck/{did}/options/preset" class="row" style="flex:1;min-width:260px">
-<input type="hidden" name="preset" value="{pid}"><input name="name" placeholder="Name for new / renamed preset" style="flex:1">
-<button name="op" value="add">Add</button><button name="op" value="clone">Clone</button>
-<button name="op" value="rename">Rename</button></form>
-{'' if pid == 1 else f'''<form method="post" action="/deck/{did}/options/preset" onsubmit="return confirm({html.escape(json.dumps(f'Delete the preset “{conf.name}”? Decks using it will go back to Default.'), quote=True)})">
-<input type="hidden" name="preset" value="{pid}"><button name="op" value="delete" class="danger">Delete</button></form>'''}
+<input type="hidden" name="preset" value="{pid}"><input name="name" placeholder="{html.escape(t("Name for new / renamed preset"))}" style="flex:1">
+<button name="op" value="add">{t("Add")}</button><button name="op" value="clone">{t("Clone")}</button>
+<button name="op" value="rename">{t("Rename")}</button></form>
+{'' if pid == 1 else f'''<form method="post" action="/deck/{did}/options/preset" onsubmit="return confirm({del_confirm})">
+<input type="hidden" name="preset" value="{pid}"><button name="op" value="delete" class="danger">{t("Delete")}</button></form>'''}
 </div></div>
 
 <form method="post" action="/deck/{did}/options" id="optform">
 <input type="hidden" name="preset_id" value="{pid}"><input type="hidden" name="full" value="1">
-<div class="box"><h3>Daily limits</h3><div class="grid">
+<div class="box"><h3>{t("Daily limits")}</h3><div class="grid">
 {num("new_per_day", c.new_per_day, c)}{num("reviews_per_day", c.reviews_per_day, c)}</div>
 <div class="grid">
-<div class="opt"><label for="limit_new">This deck only: new cards/day</label>
-<input id="limit_new" name="limit_new" type="number" min="0" value="{lim_new}" placeholder="Use preset"></div>
-<div class="opt"><label for="limit_review">This deck only: maximum reviews/day</label>
-<input id="limit_review" name="limit_review" type="number" min="0" value="{lim_rev}" placeholder="Use preset"></div></div>
-{check("new_cards_ignore_review_limit", "New cards ignore review limit", data.new_cards_ignore_review_limit)}
-{check("apply_all_parent_limits", "Limits start from top", data.apply_all_parent_limits)}
+<div class="opt"><label for="limit_new">{t("This deck only: new cards/day")}</label>
+<input id="limit_new" name="limit_new" type="number" min="0" value="{lim_new}" placeholder="{use_preset}"></div>
+<div class="opt"><label for="limit_review">{t("This deck only: maximum reviews/day")}</label>
+<input id="limit_review" name="limit_review" type="number" min="0" value="{lim_rev}" placeholder="{use_preset}"></div></div>
+{check("new_cards_ignore_review_limit", t("New cards ignore review limit"), data.new_cards_ignore_review_limit)}
+{check("apply_all_parent_limits", t("Limits start from top"), data.apply_all_parent_limits)}
 </div>
 
-<div class="box"><h3>New cards</h3><div class="grid">
-{text("learn_steps", "Learning steps", fmt_steps(c.learn_steps), "Separated by spaces, e.g. 1m 10m 1h 1d.")}
+<div class="box"><h3>{t("New cards")}</h3><div class="grid">
+{text("learn_steps", t("Learning steps"), fmt_steps(c.learn_steps), t("Separated by spaces, e.g. 1m 10m 1h 1d."))}
 {num("graduating_interval_good", c.graduating_interval_good, c)}
 {num("graduating_interval_easy", c.graduating_interval_easy, c)}
-<div class="opt"><label for="new_card_insert_order">Insertion order</label>{sel("new_card_insert_order", INSERT_ORDER, c.new_card_insert_order)}
-<div class="muted" style="font-size:13px">Changing this repositions existing new cards.</div></div>
+<div class="opt"><label for="new_card_insert_order">{t("Insertion order")}</label>{sel("new_card_insert_order", INSERT_ORDER, c.new_card_insert_order)}
+<div class="muted" style="font-size:13px">{t("Changing this repositions existing new cards.")}</div></div>
 </div></div>
 
-<div class="box"><h3>Lapses</h3><div class="grid">
-{text("relearn_steps", "Relearning steps", fmt_steps(c.relearn_steps), "Blank for none.")}
+<div class="box"><h3>{t("Lapses")}</h3><div class="grid">
+{text("relearn_steps", t("Relearning steps"), fmt_steps(c.relearn_steps), t("Blank for none."))}
 {num("minimum_lapse_interval", c.minimum_lapse_interval, c)}
 {num("leech_threshold", c.leech_threshold, c)}
-<div class="opt"><label for="leech_action">Leech action</label>{sel("leech_action", LEECH, c.leech_action)}</div>
+<div class="opt"><label for="leech_action">{t("Leech action")}</label>{sel("leech_action", LEECH, c.leech_action)}</div>
 </div></div>
 
-<div class="box"><h3>Display order</h3><div class="grid">
-<div class="opt"><label for="new_card_gather_priority">New card gather order</label>{sel("new_card_gather_priority", GATHER, c.new_card_gather_priority)}</div>
-<div class="opt"><label for="new_card_sort_order">New card sort order</label>{sel("new_card_sort_order", SORT, c.new_card_sort_order)}</div>
-<div class="opt"><label for="new_mix">New/review order</label>{sel("new_mix", MIX, c.new_mix)}</div>
-<div class="opt"><label for="interday_learning_mix">Interday learning/review order</label>{sel("interday_learning_mix", MIX, c.interday_learning_mix)}</div>
-<div class="opt"><label for="review_order">Review sort order</label>{sel("review_order", REVIEW_ORDER, c.review_order)}</div>
+<div class="box"><h3>{t("Display order")}</h3><div class="grid">
+<div class="opt"><label for="new_card_gather_priority">{t("New card gather order")}</label>{sel("new_card_gather_priority", GATHER, c.new_card_gather_priority)}</div>
+<div class="opt"><label for="new_card_sort_order">{t("New card sort order")}</label>{sel("new_card_sort_order", SORT, c.new_card_sort_order)}</div>
+<div class="opt"><label for="new_mix">{t("New/review order")}</label>{sel("new_mix", MIX, c.new_mix)}</div>
+<div class="opt"><label for="interday_learning_mix">{t("Interday learning/review order")}</label>{sel("interday_learning_mix", MIX, c.interday_learning_mix)}</div>
+<div class="opt"><label for="review_order">{t("Review sort order")}</label>{sel("review_order", REVIEW_ORDER, c.review_order)}</div>
 </div></div>
 
-<div class="box"><h3>Burying</h3>
-{check("bury_new", "Bury new siblings", c.bury_new)}
-{check("bury_reviews", "Bury review siblings", c.bury_reviews)}
-{check("bury_interday_learning", "Bury interday learning siblings", c.bury_interday_learning)}
+<div class="box"><h3>{t("Burying")}</h3>
+{check("bury_new", t("Bury new siblings"), c.bury_new)}
+{check("bury_reviews", t("Bury review siblings"), c.bury_reviews)}
+{check("bury_interday_learning", t("Bury interday learning siblings"), c.bury_interday_learning)}
 </div>
 
-<div class="box"><h3>Audio and timer</h3>
-{check("disable_autoplay", "Don’t play audio automatically", c.disable_autoplay)}
-{check("skip_question_when_replaying_answer", "Skip question when replaying answer", c.skip_question_when_replaying_answer)}
+<div class="box"><h3>{t("Audio and timer")}</h3>
+{check("disable_autoplay", t("Don’t play audio automatically"), c.disable_autoplay)}
+{check("skip_question_when_replaying_answer", t("Skip question when replaying answer"), c.skip_question_when_replaying_answer)}
 <div class="grid">{num("cap_answer_time_to_secs", c.cap_answer_time_to_secs, c)}</div>
 </div>
 
 <div class="box" id="fsrs"><h3>FSRS</h3>
-{check("fsrs", "Use FSRS (applies to the whole collection)", fsrs)}
+{check("fsrs", t("Use FSRS (applies to the whole collection)"), fsrs)}
 <div class="grid">{num("desired_retention", c.desired_retention, c)}
-{text("ignore_revlogs_before_date", "Ignore reviews before", ignore_date, "YYYY-MM-DD. Used by Optimize.", "e.g. 2024-01-01")}</div>
-{text("param_search", "Optimize search", c.param_search, "Which reviews Optimize learns from.", default_search)}
-<div class="opt"><label for="fsrs_params">FSRS parameters</label>
-<textarea id="fsrs_params" name="fsrs_params" style="min-height:70px" placeholder="Blank = defaults">{fmt_params(current_params(c))}</textarea></div>
-{check("fsrs_reschedule", "Reschedule cards on change", False)}
-<div class="row" style="margin-top:10px"><button formaction="/deck/{did}/options/optimize" formnovalidate>Optimize</button>
-<span class="muted" style="font-size:14px">Saves the form, then fits parameters to your review history with Anki's optimizer.</span></div>
+{text("ignore_revlogs_before_date", t("Ignore reviews before"), ignore_date, t("YYYY-MM-DD. Used by Optimize."), t("e.g. 2024-01-01"))}</div>
+{text("param_search", t("Optimize search"), c.param_search, t("Which reviews Optimize learns from."), default_search)}
+<div class="opt"><label for="fsrs_params">{t("FSRS parameters")}</label>
+<textarea id="fsrs_params" name="fsrs_params" style="min-height:70px" placeholder="{html.escape(t("Blank = defaults"))}">{fmt_params(current_params(c))}</textarea></div>
+{check("fsrs_reschedule", t("Reschedule cards on change"), False)}
+<div class="row" style="margin-top:10px"><button formaction="/deck/{did}/options/optimize" formnovalidate>{t("Optimize")}</button>
+<span class="muted" style="font-size:14px">{t("Saves the form, then fits parameters to your review history with Anki's optimizer.")}</span></div>
 </div>
 
-<div class="box"><details{' open' if not fsrs else ''}><summary>Advanced (SM-2)</summary>{sm2_note}<div class="grid">
+<div class="box"><details{' open' if not fsrs else ''}><summary>{t("Advanced (SM-2)")}</summary>{sm2_note}<div class="grid">
 {num("maximum_review_interval", c.maximum_review_interval, c)}
 {num("initial_ease", c.initial_ease, c)}{num("easy_multiplier", c.easy_multiplier, c)}
 {num("hard_multiplier", c.hard_multiplier, c)}{num("lapse_multiplier", c.lapse_multiplier, c)}
 {num("interval_multiplier", c.interval_multiplier, c)}</div></details></div>
 
-<div class="savebar row"><button class="primary">Save</button>
-{check("apply_children", "Save to all subdecks", False) if has_children else ""}
-<a class="btn" href="/deck/{did}">Cancel</a></div>
+<div class="savebar row"><button class="primary">{t("Save")}</button>
+{check("apply_children", t("Save to all subdecks"), False) if has_children else ""}
+<a class="btn" href="/deck/{did}">{t("Cancel")}</a></div>
 </form>"""
     return body
 
@@ -303,10 +312,10 @@ def options_page(request: Request, did: int, preset: int = 0):
         deck = col.decks.get(did, default=False)
         if not deck: return RedirectResponse("/", 303)
         if deck.get("dyn"):
-            core.set_flash(request, "!Filtered decks have no options preset.")
+            core.set_flash(request, "!" + t("Filtered decks have no options preset."))
             return RedirectResponse(f"/deck/{did}", 303)
         body = options_html(col, did, preset)
-        title = f"Options: {deck['name']}"
+        title = t("Options: {name}", name=deck["name"])
     return core.page(title, body, user, "decks", core.take_flash(request))
 
 
@@ -319,13 +328,13 @@ def apply_form(c, form):
         try:
             v = kind(float(f[name])) if kind is INT else float(f[name])
         except ValueError:
-            raise ValueError(f"{label}: “{f[name]}” is not a number.")
+            raise ValueError(t("{label}: “{value}” is not a number.", label=t(label), value=f[name]))
         setattr(c, name, min(hi, max(lo, v)))
     for name, choices in CHOICES.items():
         if name in f:
             v = int(f[name])
             if v not in [x for x, _ in choices]:
-                raise ValueError(f"Unknown choice for {name}.")
+                raise ValueError(t("Unknown choice for {name}.", name=name))
             setattr(c, name, v)
     for name in CHECKS:
         if f"has_{name}" in f:
@@ -334,13 +343,13 @@ def apply_form(c, form):
         if name in f:
             steps = parse_steps(f[name])
             if name == "learn_steps" and not steps:
-                raise ValueError("Learning steps can't be empty. Use at least one step, e.g. 1m.")
+                raise ValueError(t("Learning steps can't be empty. Use at least one step, e.g. 1m."))
             getattr(c, name)[:] = steps
     if "ignore_revlogs_before_date" in f:
         d = f["ignore_revlogs_before_date"].strip()
         if d:
             try: datetime.date.fromisoformat(d)
-            except ValueError: raise ValueError("“Ignore reviews before” must be a date like 2024-01-01.")
+            except ValueError: raise ValueError(t("“Ignore reviews before” must be a date like 2024-01-01."))
         c.ignore_revlogs_before_date = d
     if "param_search" in f:
         c.param_search = f["param_search"].strip()
@@ -348,7 +357,8 @@ def apply_form(c, form):
         params = parse_params(f["fsrs_params"])
         if params != [float(f"{p:.4f}") for p in current_params(c)]:
             if params and len(params) not in (17, 19, 21):
-                raise ValueError(f"FSRS needs 17, 19 or 21 parameters (got {len(params)}). Leave blank for defaults.")
+                raise ValueError(t("FSRS needs 17, 19 or 21 parameters (got {n}). Leave blank for defaults.",
+                                   n=len(params)))
             for field in ("fsrs_params_4", "fsrs_params_5", "fsrs_params_6"):
                 getattr(c, field)[:] = []
             target = {17: "fsrs_params_4", 19: "fsrs_params_5", 21: "fsrs_params_6"}.get(len(params))
@@ -396,9 +406,10 @@ async def options_save(request: Request, did: int):
         try:
             save_form(col, did, form)
         except Exception as e:
-            core.set_flash(request, f"!Not saved: {e}")
+            core.set_flash(request, "!" + t("Not saved: {error}", error=e))
             return RedirectResponse(options_url(did, int(form.get("preset_id") or 0)), 303)
-    core.set_flash(request, "Options saved." + (" Subdecks now use this preset too." if "apply_children" in form else ""))
+    core.set_flash(request, t("Options saved. Subdecks now use this preset too.") if "apply_children" in form
+                   else t("Options saved."))
     return RedirectResponse(f"/deck/{did}/options" if "full" in form else f"/deck/{did}", 303)
 
 
@@ -418,28 +429,28 @@ async def options_preset(request: Request, did: int):
             new = DC()
             if op == "add":
                 new.config.CopyFrom(data.defaults.config)
-                new.name = unique_name(data, name or "New preset")
+                new.name = unique_name(data, name or t("New preset"))
             else:
                 new.config.CopyFrom(conf.config)
-                new.name = unique_name(data, name or f"{conf.name} copy")
+                new.name = unique_name(data, name or t("{name} copy", name=conf.name))
             save(col, did, data, [new])
-            msg = f"Preset “{new.name}” created and chosen for this deck. Press Save after changing it."
+            msg = t("Preset “{name}” created and chosen for this deck. Press Save after changing it.", name=new.name)
         elif op == "rename":
             if not name:
-                core.set_flash(request, "!Type the new name first.")
+                core.set_flash(request, "!" + t("Type the new name first."))
                 return RedirectResponse(options_url(did, conf.id), 303)
             old = conf.name
             conf.name = unique_name(data, name) if name != old else name
             # Keep the deck on its own preset: renamed one first, the deck's preset last.
             save(col, did, data, [conf] if conf.id == deck_conf.id else [conf, deck_conf])
-            msg = f"Renamed “{old}” to “{conf.name}”."
+            msg = t("Renamed “{old}” to “{new}”.", old=old, new=conf.name)
         elif op == "delete":
             if conf.id == 1:
-                core.set_flash(request, "!The Default preset can't be deleted.")
+                core.set_flash(request, "!" + t("The Default preset can't be deleted."))
                 return RedirectResponse(options_url(did), 303)
             keep = deck_conf if deck_conf.id != conf.id else find_conf(data, 1)
             save(col, did, data, [keep], removed=[conf.id])
-            msg = f"Preset “{conf.name}” deleted. Decks that used it now use Default."
+            msg = t("Preset “{name}” deleted. Decks that used it now use Default.", name=conf.name)
         else:
             return RedirectResponse(options_url(did), 303)
     core.set_flash(request, msg)
@@ -457,7 +468,7 @@ async def options_optimize(request: Request, did: int):
         try:
             conf = save_form(col, did, form)
         except Exception as e:
-            core.set_flash(request, f"!Not saved: {e}")
+            core.set_flash(request, "!" + t("Not saved: {error}", error=e))
             return RedirectResponse(options_url(did, int(form.get("preset_id") or 0)), 303)
         data = load(col, did)
         conf = find_conf(data, conf.id)
@@ -473,19 +484,23 @@ async def options_optimize(request: Request, did: int):
                 search=search, current_params=old, ignore_revlogs_before_ms=ignore_ms,
                 num_of_relearning_steps=len(c.relearn_steps), health_check=False)
         except Exception as e:
-            core.set_flash(request, f"!Optimize failed: {e}")
+            core.set_flash(request, "!" + t("Optimize failed: {error}", error=e))
             return RedirectResponse(options_url(did, conf.id) + "#fsrs", 303)
         new = list(resp.params)
         if not resp.fsrs_items:
-            msg = "!No reviews to learn from yet, so the parameters were not changed."
+            msg = "!" + t("No reviews to learn from yet, so the parameters were not changed.")
         elif not new or [round(p, 4) for p in new] == [round(p, 4) for p in old]:
-            msg = f"Optimized using {resp.fsrs_items} reviews: the current parameters are already the best fit."
+            # English has always said "reviews" here, so both forms are the same.
+            msg = tn("Optimized using {n} reviews: the current parameters are already the best fit.",
+                     "Optimized using {n} reviews: the current parameters are already the best fit.",
+                     resp.fsrs_items)
         else:
             for field in ("fsrs_params_4", "fsrs_params_5", "fsrs_params_6"):
                 getattr(c, field)[:] = []
             c.fsrs_params_6[:] = new
             deck_conf = find_conf(data, data.current_deck.config_id)
             save(col, did, data, [conf] if conf.id == deck_conf.id else [conf, deck_conf])
-            msg = f"Optimized using {resp.fsrs_items} reviews. New parameters saved."
+            msg = tn("Optimized using {n} reviews. New parameters saved.",
+                     "Optimized using {n} reviews. New parameters saved.", resp.fsrs_items)
     core.set_flash(request, msg)
     return RedirectResponse(options_url(did, conf.id) + "#fsrs", 303)

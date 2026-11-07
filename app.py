@@ -20,6 +20,8 @@ from anki.config import Config
 from anki.utils import ids2str
 
 from flashcards.io_review import IO_REVIEW_JS
+from flashcards import i18n
+from flashcards.i18n import t, tn, N_
 
 DATA = os.environ.get("DATA_DIR", os.path.join(os.path.dirname(__file__), "data"))
 os.makedirs(DATA, exist_ok=True)
@@ -31,6 +33,7 @@ if not os.path.exists(SECRET_FILE):
 app = FastAPI()
 app.add_middleware(SessionMiddleware, secret_key=open(SECRET_FILE).read(),
                    max_age=60 * 60 * 24 * 90, same_site="lax")
+app.add_middleware(i18n.LangMiddleware)  # language per request (flashcards/i18n)
 
 # ---------- users ----------
 def load_users():
@@ -39,11 +42,34 @@ def load_users():
 def hash_pw(pw, salt):
     return hashlib.pbkdf2_hmac("sha256", pw.encode(), bytes.fromhex(salt), 200_000).hex()
 
+def save_users(users):
+    tmp = USERS_FILE + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(users, f)
+    os.replace(tmp, USERS_FILE)
+
 def create_user(name, pw):
     users = load_users()
     salt = secrets.token_hex(16)
-    users[name] = {"salt": salt, "hash": hash_pw(pw, salt)}
-    json.dump(users, open(USERS_FILE, "w"))
+    users[name] = dict(users.get(name, {}), salt=salt, hash=hash_pw(pw, salt))  # keeps the language
+    save_users(users)
+
+# Interface language per person (Preferences > Language). "" = follow the browser.
+def user_lang(name):
+    code = load_users().get(name, {}).get("lang", "")
+    return code if code in i18n.LANGUAGES else ""
+
+def set_user_lang(name, code):
+    users = load_users()
+    if name not in users:
+        return
+    if code in i18n.LANGUAGES:
+        users[name]["lang"] = code
+    else:
+        users[name].pop("lang", None)
+    save_users(users)
+
+i18n.set_user_lang_lookup(user_lang)
 
 def check_user(name, pw):
     u = load_users().get(name)
@@ -60,12 +86,25 @@ def collection(user):
         if user not in _cols:
             d = os.path.join(DATA, "users", user)
             os.makedirs(d, exist_ok=True)
-            col = Collection(os.path.join(d, "collection.anki2"))
+            col = i18n.open_collection(os.path.join(d, "collection.anki2"))  # engine in the person's language
             if col.get_config("fsrs", None) is None:
                 col.set_config("fsrs", True)
             _cols[user] = col
         maintenance.maybe_daily_backup(user, _cols[user])  # once a day; never raises
         yield _cols[user]
+
+def reopen_collection(user):
+    """Close a person's collection so the next request opens it again (after a language change,
+    so the engine's own messages use the new language)."""
+    with _glock:
+        lock = _locks.setdefault(user, threading.Lock())
+    with lock:
+        col = _cols.pop(user, None)
+        if col is not None:
+            try:
+                col.close()
+            except Exception:
+                pass
 
 def select_deck(col, did):
     # Selecting a deck is an undoable step in Anki; skip it when nothing changes.
@@ -119,8 +158,8 @@ THEMES = ("system", "light", "dark")
 THEME_KEY = "flashcardsTheme"
 
 def theme_of(col):
-    t = col.get_config(THEME_KEY, "system")
-    return t if t in THEMES else "system"
+    theme = col.get_config(THEME_KEY, "system")
+    return theme if theme in THEMES else "system"
 
 def user_theme(user):
     """Theme for page(). Read without the per-user lock, like the undo status (page() is
@@ -136,16 +175,19 @@ def user_theme(user):
 def page(title, body, user=None, active="", flash=""):
     nav = ""
     if user:
-        items = [("decks", "/", "Decks"), ("add", "/add", "Add"), ("browse", "/browse", "Browse"),
-                 ("import", "/import", "Import"), ("stats", "/stats", "Stats"), ("settings", "/settings", "Settings")]
-        nav = "".join(f'<a href="{u}" class="{"on" if k == active else ""}">{t}</a>' for k, u, t in items)
-        nav += undo_mod.header_buttons(user) + '<a href="/logout" class="muted">Log out</a>'
+        items = [("decks", "/", t("Decks")), ("add", "/add", t("Add")), ("browse", "/browse", t("Browse")),
+                 ("import", "/import", t("Import")), ("stats", "/stats", t("Stats")),
+                 ("settings", "/settings", t("Settings"))]
+        nav = "".join(f'<a href="{u}" class="{"on" if k == active else ""}">{label}</a>' for k, u, label in items)
+        nav += undo_mod.header_buttons(user) + f'<a href="/logout" class="muted">{t("Log out")}</a>'
     fl = ""
     if flash:
         cls = "flash err" if flash.startswith("!") else "flash"
         fl = f'<div class="{cls}">{html.escape(flash.lstrip("!"))}</div>'
     theme = user_theme(user)
     root = f' class="{theme}"' if theme in ("light", "dark") else ""
+    lang = i18n.current()
+    root += "" if lang == "en" else f' lang="{lang}"'
     return HTMLResponse(f"""<!doctype html><html{root}><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes">
@@ -160,30 +202,44 @@ def take_flash(request):
 def set_flash(request, msg):
     request.session["flash"] = msg
 
+def h(s):
+    """Escape translated text for an HTML text node (quotes are left alone)."""
+    return html.escape(s, quote=False)
+
+def ht(template, **markup):
+    """A translated sentence with HTML in its placeholders: escape the text, then put the markup in.
+    Call as ht(t("Ready in {time}."), time="<b>...</b>") (t() without arguments leaves {time} in)."""
+    s = h(template)
+    try:
+        return s.format(**markup)
+    except (KeyError, IndexError, ValueError):
+        return s
+
 # Manifest, icons, offline page and HTML error pages: flashcards/touch.py
 
 # ---------- auth ----------
 @app.get("/login", response_class=HTMLResponse)
 def login_page(request: Request):
     first = not load_users()
-    title = "Create the first account" if first else "Log in"
+    title = t("Create the first account") if first else t("Log in")
+    button = t("Create account") if first else t("Log in")
     return page(title, f"""<div class="box" style="max-width:420px;margin:40px auto">
-<h2 style="margin-top:0">{title}</h2><form method="post">
-<label>Username</label><input name="username" autocapitalize="none" autocomplete="username" required>
-<label>Password</label><input name="password" type="password" autocomplete="current-password" required>
-<p><button class="primary" style="width:100%">{'Create account' if first else 'Log in'}</button></p></form></div>""",
+<h2 style="margin-top:0">{h(title)}</h2><form method="post">
+<label>{h(t("Username"))}</label><input name="username" autocapitalize="none" autocomplete="username" required>
+<label>{h(t("Password"))}</label><input name="password" type="password" autocomplete="current-password" required>
+<p><button class="primary" style="width:100%">{h(button)}</button></p></form></div>""",
                 flash=take_flash(request))
 
 @app.post("/login")
 def login(request: Request, username: str = Form(...), password: str = Form(...)):
     username = username.strip().lower()
     if not re.fullmatch(r"[a-z0-9_.-]{2,32}", username):
-        set_flash(request, "!Username: 2-32 letters, numbers, dot, dash or underscore.")
+        set_flash(request, "!" + t("Username: 2-32 letters, numbers, dot, dash or underscore."))
         return RedirectResponse("/login", 303)
     if not load_users():
         create_user(username, password)
     if not check_user(username, password):
-        set_flash(request, "!Wrong username or password.")
+        set_flash(request, "!" + t("Wrong username or password."))
         return RedirectResponse("/login", 303)
     request.session["user"] = username
     return RedirectResponse("/", 303)
@@ -203,13 +259,13 @@ PLAY_SVG = ('<svg viewBox="0 0 64 64" width="40" height="40"><circle cx="32" cy=
 def av_list(tags):
     """Anki's [sound:]/TTS tags as playable items for the study screen's player."""
     out = []
-    for t in tags:
-        if isinstance(t, SoundOrVideoTag):
-            video = t.filename.lower().endswith(VIDEO_EXTS)
-            out.append({"t": "video" if video else "sound", "src": "/media/" + quote(t.filename)})
+    for tag in tags:
+        if isinstance(tag, SoundOrVideoTag):
+            video = tag.filename.lower().endswith(VIDEO_EXTS)
+            out.append({"t": "video" if video else "sound", "src": "/media/" + quote(tag.filename)})
         else:   # TTSTag: spoken by the browser's speech synthesis
-            out.append({"t": "tts", "text": t.field_text, "lang": t.lang.replace("_", "-"),
-                        "speed": t.speed or 1.0})
+            out.append({"t": "tts", "text": tag.field_text, "lang": tag.lang.replace("_", "-"),
+                        "speed": tag.speed or 1.0})
     return out
 
 def render_side(col, card, text):
@@ -225,7 +281,7 @@ def render_side(col, card, text):
         if isinstance(tag, SoundOrVideoTag) and tag.filename.lower().endswith(VIDEO_EXTS):
             return (f'<video controls playsinline src="/media/{html.escape(quote(tag.filename))}" '
                     f'style="max-width:100%"></video>')
-        return (f'<a class="replay-button soundLink" href="#" title="Play" '
+        return (f'<a class="replay-button soundLink" href="#" title="{html.escape(t("Play"))}" '
                 f'onclick="parent.fcPlay&&parent.fcPlay(\'{side}\',{idx});return false;">{PLAY_SVG}</a>')
     return re.sub(r"\[anki:play:(q|a):(\d+)\]", audio, text)
 
@@ -256,8 +312,8 @@ def type_question(info, text):
     if not info:
         return text
     if info["expected"] is None:
-        warn = ("Please run Tools&gt;Empty Cards" if info["cloze"]
-                else f"Type answer: unknown field {html.escape(info['field'])}")
+        warn = (h(t("Please run Tools>Empty Cards")) if info["cloze"]
+                else h(t("Type answer: unknown field {field}", field=info["field"])))
         return TYPE_PAT.sub(warn, text)
     if not info["expected"]:
         return TYPE_PAT.sub("", text)
@@ -317,55 +373,60 @@ img.latex{{vertical-align:middle}}
 </style>{mj}</head><body class="card">{inner}</body></html>"""
 
 # ---------- card actions (suspend, bury, flag, mark, reset, set due date) ----------
-FLAGS = [(0, "No flag", "transparent"), (1, "Red", "#e5484d"), (2, "Orange", "#f08c00"), (3, "Green", "#2f9e44"),
-         (4, "Blue", "#2f6fde"), (5, "Pink", "#e64980"), (6, "Turquoise", "#12b5b0"), (7, "Purple", "#8e44ec")]
+# Names are marked with N_ and translated where shown: t(FLAG_NAME[n]).
+FLAGS = [(0, N_("No flag"), "transparent"), (1, N_("Red"), "#e5484d"), (2, N_("Orange"), "#f08c00"),
+         (3, N_("Green"), "#2f9e44"), (4, N_("Blue"), "#2f6fde"), (5, N_("Pink"), "#e64980"),
+         (6, N_("Turquoise"), "#12b5b0"), (7, N_("Purple"), "#8e44ec")]
 FLAG_COLOR = {n: c for n, _, c in FLAGS}
-FLAG_NAME = {n: t for n, t, _ in FLAGS}
+FLAG_NAME = {n: name for n, name, _ in FLAGS}
 # Undo labels the engine gives these actions; the study screen offers undo for them.
 STUDY_UNDOABLE = ("answer", "suspend", "bury", "flag", "tag", "reset", "due date", "forget")
 
+CARD_STATES = {0: N_("New"), 1: N_("Learning"), 2: N_("Review"), 3: N_("Learning")}
+
 def card_state(card):
-    if card.queue == -1: return "Suspended"
-    if card.queue in (-2, -3): return "Buried"
-    return {0: "New", 1: "Learning", 2: "Review", 3: "Learning"}.get(card.type if card.queue == 4 else card.queue, "")
+    """English state name (a key: show it with t(card_state(card)))."""
+    if card.queue == -1: return N_("Suspended")
+    if card.queue in (-2, -3): return N_("Buried")
+    return CARD_STATES.get(card.type if card.queue == 4 else card.queue, "")
 
 def card_action(col, card, action, arg=""):
     """Run one Anki card action through the engine; returns a short message."""
     cid, nid = card.id, card.nid
     note_cids = [c for c in col.card_ids_of_note(nid)]
     if action == "suspend":
-        col.sched.suspend_cards([cid]); return "Card suspended."
+        col.sched.suspend_cards([cid]); return t("Card suspended.")
     if action == "suspend_note":
-        col.sched.suspend_cards(note_cids); return "Note suspended."
+        col.sched.suspend_cards(note_cids); return t("Note suspended.")
     if action == "unsuspend":
-        col.sched.unsuspend_cards([cid]); return "Card unsuspended."
+        col.sched.unsuspend_cards([cid]); return t("Card unsuspended.")
     if action == "bury":
-        col.sched.bury_cards([cid]); return "Card buried."
+        col.sched.bury_cards([cid]); return t("Card buried.")
     if action == "bury_note":
-        col.sched.bury_notes([nid]); return "Note buried."
+        col.sched.bury_notes([nid]); return t("Note buried.")
     if action == "unbury":
-        col.sched.unbury_cards([cid]); return "Card unburied."
+        col.sched.unbury_cards([cid]); return t("Card unburied.")
     if action == "flag":
         flag = int(arg or 0)
-        if not 0 <= flag <= 7: raise ValueError("Unknown flag.")
+        if not 0 <= flag <= 7: raise ValueError(t("Unknown flag."))
         if flag and card.user_flag() == flag:   # pressing the same flag again clears it, as in Anki
             flag = 0
         col.set_user_flag_for_cards(flag, [cid])
-        return f"Flag: {FLAG_NAME[flag]}." if flag else "Flag removed."
+        return t("Flag: {flag}.", flag=t(FLAG_NAME[flag])) if flag else t("Flag removed.")
     if action == "mark":
         if col.get_note(nid).has_tag("marked"):
-            col.tags.bulk_remove([nid], "marked"); return "Note unmarked."
-        col.tags.bulk_add([nid], "marked"); return "Note marked."
+            col.tags.bulk_remove([nid], "marked"); return t("Note unmarked.")
+        col.tags.bulk_add([nid], "marked"); return t("Note marked.")
     if action == "reset":
         col.sched.schedule_cards_as_new([cid], restore_position=True, reset_counts=False)
-        return "Card reset to new."
+        return t("Card reset to new.")
     if action == "due":
         days = (arg or "").strip().replace(" ", "")
         if not re.fullmatch(r"\d+(-\d+)?!?", days):
-            raise ValueError("Due date: enter days like 0 (today), 1, 3-7, or 5! to also set the interval.")
+            raise ValueError(t("Due date: enter days like 0 (today), 1, 3-7, or 5! to also set the interval."))
         col.sched.set_due_date([cid], days)
-        return "Due date set."
-    raise ValueError("Unknown action.")
+        return t("Due date set.")
+    raise ValueError(t("Unknown action."))
 
 @app.post("/card/{cid}/action")
 async def card_action_route(request: Request, cid: int):
@@ -384,7 +445,7 @@ async def card_action_route(request: Request, cid: int):
             info = {"flag": card.user_flag(), "marked": col.get_note(card.nid).has_tag("marked"),
                     "queue": card.queue, "state": card_state(card)}
         except Exception as e:
-            msg, good, info = str(e) or "That did not work.", False, {}
+            msg, good, info = str(e) or t("That did not work."), False, {}
     if ajax:
         return {"ok": good, "msg": msg, "stamp": sync_mod.stamp(user), **info}
     set_flash(request, msg if good else "!" + msg)
@@ -392,7 +453,7 @@ async def card_action_route(request: Request, cid: int):
 
 def flag_dot(flag, size=12):
     if not flag: return ""
-    return (f'<span title="{FLAG_NAME[flag]} flag" style="display:inline-block;width:{size}px;height:{size}px;'
+    return (f'<span title="{html.escape(t("{flag} flag", flag=t(FLAG_NAME[flag])))}" style="display:inline-block;width:{size}px;height:{size}px;'
             f'border-radius:50%;background:{FLAG_COLOR[flag]};vertical-align:middle"></span>')
 
 # ---------- card info (Anki's "Card Info" window) ----------
@@ -404,46 +465,65 @@ def fmt_span(secs):
         if secs >= size:
             v = round(secs / size, 1 if unit in ("year", "month") else 0)
             v = int(v) if v == int(v) else v
-            return f"{v} {unit}{'' if v == 1 else 's'}"
+            return _span_text(unit, v)
     v = round(secs) if secs >= 1 else round(secs, 1)
-    return f"{v} second{'' if v == 1 else 's'}"
+    return _span_text("second", v)
+
+def _span_text(unit, v):
+    """'3 days', '2.1 months' in the current language (fractions take their own wording)."""
+    if isinstance(v, float):
+        if unit == "year": return t("{n} years", n=v)
+        if unit == "month": return t("{n} months", n=v)
+        return t("{n} seconds", n=v)
+    if unit == "year": return tn("{n} year", "{n} years", v)
+    if unit == "month": return tn("{n} month", "{n} months", v)
+    if unit == "day": return tn("{n} day", "{n} days", v)
+    if unit == "hour": return tn("{n} hour", "{n} hours", v)
+    if unit == "minute": return tn("{n} minute", "{n} minutes", v)
+    return tn("{n} second", "{n} seconds", v)
 
 def fmt_date(ts, with_time=False):
     return time.strftime("%Y-%m-%d %H:%M" if with_time else "%Y-%m-%d", time.localtime(ts))
 
-REVIEW_KIND = {0: ("Learn", "lrn"), 1: ("Review", "rev"), 2: ("Relearn", "lrn"), 3: ("Filtered", "new"),
-               4: ("Manual", "muted"), 5: ("Rescheduled", "muted")}
-RATING = {0: ("—", "muted"), 1: ("Again", "again"), 2: ("Hard", "hard"), 3: ("Good", "good"), 4: ("Easy", "easy")}
+# Labels are marked with N_ and translated where shown.
+REVIEW_KIND = {0: (N_("Learn"), "lrn"), 1: (N_("Review"), "rev"), 2: (N_("Relearn"), "lrn"),
+               3: (N_("Filtered"), "new"), 4: (N_("Manual"), "muted"), 5: (N_("Rescheduled"), "muted")}
+RATING = {0: ("—", "muted"), 1: (N_("Again"), "again"), 2: (N_("Hard"), "hard"), 3: (N_("Good"), "good"),
+          4: (N_("Easy"), "easy")}
 
 def card_info_html(col, cid):
     """Card statistics from the engine's card_stats call, laid out like Anki's Card Info."""
     s = col.card_stats_data(cid)
     card = col.get_card(cid)
-    rows = [("Added", fmt_date(s.added))]
-    if s.HasField("first_review"): rows.append(("First review", fmt_date(s.first_review)))
-    if s.HasField("latest_review"): rows.append(("Latest review", fmt_date(s.latest_review)))
-    if s.interval: rows.append(("Interval", fmt_span(s.interval * 86400)))
+    rows = [(t("Added"), fmt_date(s.added))]
+    if s.HasField("first_review"): rows.append((t("First review"), fmt_date(s.first_review)))
+    if s.HasField("latest_review"): rows.append((t("Latest review"), fmt_date(s.latest_review)))
+    if s.interval: rows.append((t("Interval"), fmt_span(s.interval * 86400)))
     fsrs = bool(col.get_config("fsrs", False)) and s.HasField("memory_state")
     if fsrs:
-        rows.append(("Stability", fmt_span(s.memory_state.stability * 86400)))
-        rows.append(("Difficulty", f"{round((s.memory_state.difficulty - 1) / 9 * 100)}%"))
+        rows.append((t("Stability"), fmt_span(s.memory_state.stability * 86400)))
+        rows.append((t("Difficulty"), f"{round((s.memory_state.difficulty - 1) / 9 * 100)}%"))
         if s.HasField("fsrs_retrievability"):
-            rows.append(("Retrievability", f"{round(s.fsrs_retrievability * 100)}%"))
+            rows.append((t("Retrievability"), f"{round(s.fsrs_retrievability * 100)}%"))
     elif s.ease:
-        rows.append(("Ease", f"{s.ease // 10}%"))
-    paused = " (suspended)" if card.queue == -1 else " (buried)" if card.queue in (-2, -3) else ""
+        rows.append((t("Ease"), f"{s.ease // 10}%"))
+    def paused(value):
+        if card.queue == -1: return t("{value} (suspended)", value=value)
+        if card.queue in (-2, -3): return t("{value} (buried)", value=value)
+        return value
     if s.HasField("due_date"):
-        rows.append(("Due", fmt_date(s.due_date) + paused))
+        rows.append((t("Due"), paused(fmt_date(s.due_date))))
     elif s.HasField("due_position"):
-        rows.append(("Position", f"{s.due_position}{paused}"))
-    rows += [("Reviews", str(s.reviews)), ("Lapses", str(s.lapses))]
+        rows.append((t("Position"), paused(str(s.due_position))))
+    rows += [(t("Reviews"), str(s.reviews)), (t("Lapses"), str(s.lapses))]
     if s.reviews:
-        rows += [("Average time", fmt_span(s.average_secs)), ("Total time", fmt_span(s.total_secs))]
-    rows += [("Card type", s.card_type), ("Note type", s.notetype),
-             ("Deck", s.deck + (f" (from {s.original_deck})" if s.HasField("original_deck") else "")),
-             ("Preset", s.preset), ("Card ID", str(s.card_id)), ("Note ID", str(s.note_id))]
-    if s.custom_data: rows.append(("Custom data", s.custom_data))
-    stats = "".join(f'<tr><th>{k}</th><td>{html.escape(v)}</td></tr>' for k, v in rows)
+        rows += [(t("Average time"), fmt_span(s.average_secs)), (t("Total time"), fmt_span(s.total_secs))]
+    deck = (t("{deck} (from {original})", deck=s.deck, original=s.original_deck)
+            if s.HasField("original_deck") else s.deck)
+    rows += [(t("Card type"), s.card_type), (t("Note type"), s.notetype), (t("Deck"), deck),
+             (t("Preset"), s.preset), (t("Card ID"), str(s.card_id)), (t("Note ID"), str(s.note_id))]
+    if s.custom_data: rows.append((t("Custom data"), s.custom_data))
+    stats = "".join(f'<tr><th>{h(k)}</th><td>{html.escape(v)}</td></tr>' for k, v in rows)
     has_mem = bool(col.get_config("fsrs", False)) and any(e.HasField("memory_state") for e in s.revlog)
     hist = []
     for e in s.revlog:   # newest first, as in Anki
@@ -457,12 +537,13 @@ def card_info_html(col, cid):
         else:
             extra = f'<td>{e.ease // 10}%</td>' if e.ease else "<td>—</td>"
         hist.append(f"""<tr><td style="white-space:nowrap">{fmt_date(e.time, True)}</td>
-<td class="{kcls}">{kind}</td><td style="color:var(--{rcls})">{rating}</td><td>{ivl}</td>{extra}
+<td class="{kcls}">{h(t(kind))}</td><td style="color:var(--{rcls})">{h(t(rating))}</td><td>{ivl}</td>{extra}
 <td>{fmt_span(e.taken_secs) if e.taken_secs else '—'}</td></tr>""")
-    cols = "<th>Stability</th><th>Difficulty</th>" if has_mem else "<th>Ease</th>"
-    history = (f"""<div style="overflow-x:auto"><table class="hist"><tr><th>Date</th><th>Type</th><th>Rating</th>
-<th>Interval</th>{cols}<th>Time</th></tr>{''.join(hist)}</table></div>""" if hist
-               else '<p class="muted">This card has not been reviewed yet.</p>')
+    cols = (f"<th>{h(t('Stability'))}</th><th>{h(t('Difficulty'))}</th>" if has_mem
+            else f"<th>{h(t('Ease'))}</th>")
+    history = (f"""<div style="overflow-x:auto"><table class="hist"><tr><th>{h(t("Date"))}</th><th>{h(t("Type"))}</th><th>{h(t("Rating"))}</th>
+<th>{h(t("Interval"))}</th>{cols}<th>{h(t("Time"))}</th></tr>{''.join(hist)}</table></div>""" if hist
+               else f'<p class="muted">{h(t("This card has not been reviewed yet."))}</p>')
     return stats, history, s.note_id
 
 @app.get("/card/{cid}/info", response_class=HTMLResponse)
@@ -474,21 +555,21 @@ def card_info(request: Request, cid: int, back: str = ""):
         try:
             card = col.get_card(cid)
         except Exception:
-            set_flash(request, "!That card was not found.")
+            set_flash(request, "!" + t("That card was not found."))
             return RedirectResponse("/browse", 303)
         stats, history, nid = card_info_html(col, cid)
         title = strip_html(card.question())[:80]
-    back_btn = f'<a class="btn" href="{html.escape(back)}">← Back</a>' if back else ""
+    back_btn = f'<a class="btn" href="{html.escape(back)}">{h(t("← Back"))}</a>' if back else ""
     edit_back = quote(f"/card/{cid}/info" + (f"?back={quote(back, safe='/')}" if back else ""), safe="/")
     body = f"""<style>.info th{{width:40%;font-size:15px}}.info td,.info th{{padding:9px 8px}}
 .hist td,.hist th{{padding:9px 8px;font-size:15px}}</style>
 <div class="row" style="justify-content:space-between;margin-bottom:12px">{back_btn}
-<a class="btn" href="/edit/{nid}?back={edit_back}">Edit note</a></div>
-<div class="box"><h2 style="margin-top:0">Card info</h2>
-<p class="muted" style="margin-top:-6px">{html.escape(title) or '(empty)'}</p>
+<a class="btn" href="/edit/{nid}?back={edit_back}">{h(t("Edit note"))}</a></div>
+<div class="box"><h2 style="margin-top:0">{h(t("Card info"))}</h2>
+<p class="muted" style="margin-top:-6px">{html.escape(title) or h(t("(empty)"))}</p>
 <table class="info">{stats}</table></div>
-<div class="box"><h3 style="margin-top:0">Review history</h3>{history}</div>"""
-    return page("Card info", body, user, "browse", take_flash(request))
+<div class="box"><h3 style="margin-top:0">{h(t("Review history"))}</h3>{history}</div>"""
+    return page(t("Card info"), body, user, "browse", take_flash(request))
 
 def js(value):
     """JSON for inline <script>: no '<' so card HTML or URL text can't close the script tag."""
@@ -500,21 +581,27 @@ def study_undo_label(col):
 
 def fmt_wait(secs):
     mins = max(1, round(secs / 60))
-    return f"{mins} minute{'s' if mins != 1 else ''}" if mins < 60 else fmt_span(secs)
+    return tn("{n} minute", "{n} minutes", mins) if mins < 60 else fmt_span(secs)
+
+def study_undo_button(did, undo_label):
+    if not undo_label:
+        return ""
+    return (f'<form method="post" action="/study/{did}/undo"><button>'
+            f'{html.escape(t("Undo {action}", action=undo_label))}</button></form>')
 
 def study_waiting(request, user, did, secs, undo_label, flash):
     """Anki's 'learning cards due later' state: nothing to show yet, but cards answered
     Again come back in this session once their step is up, so wait and reload."""
-    undo = (f'<form method="post" action="/study/{did}/undo"><button>Undo {html.escape(undo_label)}</button></form>'
-            if undo_label else "")
+    undo = study_undo_button(did, undo_label)
+    wait = ht(t("The next learning card will be ready in {time}."), time=f'<b id="wait">{h(fmt_wait(secs))}</b>')
     body = f"""<div class="row" style="justify-content:space-between;margin-bottom:10px">
-<a href="/deck/{did}" class="btn">\u2190 Deck</a>{undo}</div>
-<div class="box" style="text-align:center"><h2 style="margin-top:0">Nothing due right now</h2>
-<p>The next learning card will be ready in <b id="wait">{fmt_wait(secs)}</b>.</p>
-<p class="muted">Keep this screen open and it will carry on by itself.</p>
-<a class="btn primary" href="/study/{did}">Check again</a></div>
+<a href="/deck/{did}" class="btn">{h(t("\u2190 Deck"))}</a>{undo}</div>
+<div class="box" style="text-align:center"><h2 style="margin-top:0">{h(t("Nothing due right now"))}</h2>
+<p>{wait}</p>
+<p class="muted">{h(t("Keep this screen open and it will carry on by itself."))}</p>
+<a class="btn primary" href="/study/{did}">{h(t("Check again"))}</a></div>
 <script>setTimeout(()=>location.replace('/study/{did}'),{(int(secs) + 1) * 1000});</script>"""
-    return page("Study", body, user, "decks", flash)
+    return page(t("Study"), body, user, "decks", flash)
 
 # Timebox (Preferences > Timebox time limit), like Anki's collection.startTimebox/timeboxReached,
 # but kept per browser session: one collection is shared by all of a user's devices.
@@ -555,12 +642,12 @@ def study(request: Request, did: int, cid: int = 0, shown: int = 0, ms: int = 0,
             info = col.sched.congratulations_info()
             if 0 < info.secs_until_next_learn < 86400 and info.learn_remaining:
                 return study_waiting(request, user, did, info.secs_until_next_learn, study_undo_label(col), flash)
-            done = "Congratulations! You have finished this deck for now."
+            done = t("Congratulations! You have finished this deck for now.")
             set_flash(request, f"{flash.lstrip('!')} {done}" if flash else done)
             return RedirectResponse(f"/deck/{did}", 303)
         qc = q.cards[0]
         card = col.get_card(qc.card.id)
-        labels = [re.sub(r'[\u2068\u2069]', '', l) for l in col.sched.describe_next_states(qc.states)]
+        labels = [re.sub(r'[\u2068\u2069]', '', l) for l in i18n.describe_next_states(col, qc.states)]
         qtext = card.question()
         tinfo = type_answer_info(col, card, qtext)
         question = render_side(col, card, type_question(tinfo, addons.card_render(col, card, "question", qtext)))
@@ -584,29 +671,28 @@ def study(request: Request, did: int, cid: int = 0, shown: int = 0, ms: int = 0,
     start_shown = resume and bool(shown)
     elapsed = max(0, min(ms, 3_600_000)) if resume else 0
     qdoc, adoc = js(card_doc(question, theme)), js(card_doc(answer, theme))
-    names = ["Again", "Hard", "Good", "Easy"]
+    names = [t("Again"), t("Hard"), t("Good"), t("Easy")]
     colors = ["again", "hard", "good", "easy"]
     btns = "".join(f"""<button class="ans" style="border-color:var(--{c});color:var(--{c})"
-onclick="answer({i + 1})">{f'<small>{html.escape(labels[i])}</small><br>' if show_times else ''}{n}</button>"""
+onclick="answer({i + 1})">{f'<small>{html.escape(labels[i])}</small><br>' if show_times else ''}{h(n)}</button>"""
                    for i, (n, c) in enumerate(zip(names, colors)))
-    undo = f'<form method="post" action="/study/{did}/undo"><button>Undo {html.escape(undo_label)}</button></form>' \
-        if undo_label else ""
+    undo = study_undo_button(did, undo_label)
     flag_btns = "".join(f"""<button type="button" class="fl" onclick="act('flag',{n})" title="Ctrl+{n}">
-<span class="dot" style="background:{c}"></span>{t}</button>""" for n, t, c in FLAGS[1:])
-    menu = f"""<details class="more"><summary class="btn">More ▾</summary><div class="menu">
-<button type="button" onclick="act('mark')">★ Mark note <kbd>*</kbd></button>
-<button type="button" onclick="act('bury')">Bury card <kbd>-</kbd></button>
-<button type="button" onclick="act('bury_note')">Bury note <kbd>=</kbd></button>
-<button type="button" onclick="act('suspend')">Suspend card <kbd>@</kbd></button>
-<button type="button" onclick="act('suspend_note')">Suspend note <kbd>!</kbd></button>
-<button type="button" onclick="setDue()">Set due date… <kbd>Ctrl+Shift+D</kbd></button>
-<button type="button" onclick="resetCard()">Reset to new… <kbd>Ctrl+Alt+N</kbd></button>
-<button type="button" onclick="info()">Card info <kbd>I</kbd></button>
-<button type="button" onclick="replay()">Replay audio <kbd>R</kbd></button>
+<span class="dot" style="background:{c}"></span>{h(t(name))}</button>""" for n, name, c in FLAGS[1:])
+    menu = f"""<details class="more"><summary class="btn">{h(t("More ▾"))}</summary><div class="menu">
+<button type="button" onclick="act('mark')">{h(t("★ Mark note"))} <kbd>*</kbd></button>
+<button type="button" onclick="act('bury')">{h(t("Bury card"))} <kbd>-</kbd></button>
+<button type="button" onclick="act('bury_note')">{h(t("Bury note"))} <kbd>=</kbd></button>
+<button type="button" onclick="act('suspend')">{h(t("Suspend card"))} <kbd>@</kbd></button>
+<button type="button" onclick="act('suspend_note')">{h(t("Suspend note"))} <kbd>!</kbd></button>
+<button type="button" onclick="setDue()">{h(t("Set due date…"))} <kbd>Ctrl+Shift+D</kbd></button>
+<button type="button" onclick="resetCard()">{h(t("Reset to new…"))} <kbd>Ctrl+Alt+N</kbd></button>
+<button type="button" onclick="info()">{h(t("Card info"))} <kbd>I</kbd></button>
+<button type="button" onclick="replay()">{h(t("Replay audio"))} <kbd>R</kbd></button>
 <div class="flags">{flag_btns}</div></div></details>"""
     has_audio = any(x["t"] != "video" for x in av["q"] + av["a"])
-    replay_btn = (f'<button type="button" id="replay" onclick="replay()" title="Replay audio (R)" '
-                  f'aria-label="Replay audio">🔊</button>' if has_audio else "")
+    replay_btn = (f'<button type="button" id="replay" onclick="replay()" title="{html.escape(t("Replay audio (R)"))}" '
+                  f'aria-label="{html.escape(t("Replay audio"))}">🔊</button>' if has_audio else "")
     body = f"""<style>main{{max-width:900px}}#frame{{width:100%;min-height:55vh;border:1px solid var(--line);
 border-radius:14px;background:var(--card)}}.bar{{position:sticky;bottom:0;padding:12px 0;background:var(--bg)}}
 .ans{{flex:1;min-height:64px;font-weight:600}}.ans small{{font-weight:400;opacity:.8}}
@@ -627,20 +713,20 @@ html,body{{overscroll-behavior:none}}.bar{{padding-bottom:max(12px,env(safe-area
 .ans,#show{{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}}
 #taphint{{font-size:13px;text-align:center;margin:0 0 6px}}{whiteboard.CSS}</style>
 <div class="row" style="justify-content:space-between;margin-bottom:10px">
-<a href="/deck/{did}" class="btn">← Deck</a>
-<div class="counts"><span id="flag" class="dot" title="{FLAG_NAME[flag]} flag"
+<a href="/deck/{did}" class="btn">{h(t("← Deck"))}</a>
+<div class="counts"><span id="flag" class="dot" title="{html.escape(t("{flag} flag", flag=t(FLAG_NAME[flag])))}"
 style="background:{FLAG_COLOR[flag]};{'' if flag else 'display:none'}"></span>
-<span id="mark" title="Marked" style="{'' if marked else 'display:none'}">★</span>
+<span id="mark" title="{html.escape(t("Marked"))}" style="{'' if marked else 'display:none'}">★</span>
 {f'''<span class="new {'cur' if kind == 'new' else ''}">{counts[0]}</span>
 <span class="lrn {'cur' if kind == 'lrn' else ''}">{counts[1]}</span>
 <span class="rev {'cur' if kind == 'rev' else ''}">{counts[2]}</span>''' if show_counts else ''}</div>
 <div class="row">{undo}{replay_btn}{whiteboard.toggle_html(wb)}<a class="btn" href="/edit/{card.nid}?back=/study/{did}"
-onclick="edit();return false;">Edit</a>{menu}</div></div>
+onclick="edit();return false;">{h(t("Edit"))}</a>{menu}</div></div>
 <div id="toast"></div>{whiteboard.bar_html(wb)}
 <div id="wbwrap"><iframe id="frame" sandbox="allow-same-origin allow-scripts"></iframe><canvas id="wb" style="display:none"></canvas></div>
 <form id="f" method="post" action="/study/{did}/answer"><input type="hidden" name="card_id" value="{card.id}">
 <input type="hidden" name="rating" id="rating"><input type="hidden" name="ms" id="ms"></form>
-<div class="bar">{'<p id="taphint" class="muted">Tap the card to show the answer</p>' if tap else ''}<button id="show" class="primary" style="width:100%;min-height:64px" onclick="show()">Show answer</button>
+<div class="bar">{f'<p id="taphint" class="muted">{h(t("Tap the card to show the answer"))}</p>' if tap else ''}<button id="show" class="primary" style="width:100%;min-height:64px" onclick="show()">{h(t("Show answer"))}</button>
 <div id="btns" class="row" style="display:none;flex-wrap:nowrap">{btns}</div></div>
 <script>
 const Q={qdoc},A={adoc},t0=Date.now()-{elapsed},fr=document.getElementById('frame');let shown=false,busy=false,quiet={js(resume)};
@@ -681,7 +767,7 @@ function next(){{const it=playing.shift();if(!it){{cur=null;return;}}
  if(it.t==='tts'){{if(!window.speechSynthesis){{next();return;}}const u=new SpeechSynthesisUtterance(it.text);
   if(it.lang)u.lang=it.lang;u.rate=it.speed||1;u.onend=next;u.onerror=next;cur=null;speechSynthesis.speak(u);return;}}
  cur=new Audio(it.src);cur.onended=next;cur.onerror=next;
- cur.play().catch(e=>{{if(e.name==='NotAllowedError'){{playing=[];toast('Tap 🔊 to play the audio');}}else next();}});}}
+ cur.play().catch(e=>{{if(e.name==='NotAllowedError'){{playing=[];toast({js(t("Tap 🔊 to play the audio"))});}}else next();}});}}
 function fcPlay(side,i){{const it=AV[side][i];if(it)playList([it]);}}
 function sideTags(){{return shown?(AV.replayq?AV.q.concat(AV.a):AV.a):AV.q;}}
 function replay(){{document.querySelector('.more').open=false;playList(sideTags());}}
@@ -691,7 +777,7 @@ async function show(){{if(shown||busy)return;busy=true;let d=A;
    out=(await(await fetch('/study/{did}/typeans',{{method:'POST',body:fd}})).json()).html;}}catch(e){{}}
   d=A.replace(SLOT,()=>out);}}
  shown=true;shownAt=Date.now();busy=false;load(d);
- const th=document.getElementById('taphint');if(th)th.textContent='Tap the card: left half Again · right half Good';document.getElementById('show').style.display='none';
+ const th=document.getElementById('taphint');if(th)th.textContent={js(t("Tap the card: left half Again · right half Good"))};document.getElementById('show').style.display='none';
  document.getElementById('btns').style.display='flex';if(AV.autoplay&&!quiet)playList(AV.a);quiet=false;}}
 function answer(r){{if(!shown||sent)return;sent=true;stopAudio();document.getElementById('rating').value=r;
  document.getElementById('ms').value=Date.now()-t0;document.getElementById('f').submit();}}
@@ -705,15 +791,15 @@ async function act(a,arg){{document.querySelector('.more').open=false;
  const fd=new FormData();fd.append('action',a);fd.append('arg',arg??'');
  let r;try{{r=await(await fetch('/card/{card.id}/action',
   {{method:'POST',body:fd,headers:{{'X-Requested-With':'fetch'}}}})).json();}}
- catch(e){{toast("Couldn't reach the server. Check the connection and try again.");return;}}
+ catch(e){{toast({js(t("Couldn't reach the server. Check the connection and try again."))});return;}}
  toast(r.msg);if(!r.ok)return;
  if(['flag','mark'].includes(a)){{if(r.stamp&&window.fcStampSeen)fcStampSeen(r.stamp);const f=document.getElementById('flag');f.style.display=r.flag?'':'none';
   f.style.background=FC[r.flag];document.getElementById('mark').style.display=r.marked?'':'none';}}
  else setTimeout(()=>location.replace('/study/{did}'),500);}}
-function setDue(){{const d=prompt('Show this card in how many days? (0 = today, 3-7 = random range, add ! to also set the interval)','1');
+function setDue(){{const d=prompt({js(t("Show this card in how many days? (0 = today, 3-7 = random range, add ! to also set the interval)"))},'1');
  if(d!==null&&d.trim())act('due',d.trim());}}
 function info(){{stopAudio();location.href='/card/{card.id}/info?back=/study/{did}'+encodeURIComponent(here());}}
-function resetCard(){{if(confirm('Reset this card to new? Its review history is kept.'))act('reset');}}
+function resetCard(){{if(confirm({js(t("Reset this card to new? Its review history is kept."))}))act('reset');}}
 function key(e){{const tg=e.target.tagName;
  if(tg==='INPUT'||tg==='TEXTAREA'||tg==='SELECT'){{if(e.key==='Enter'&&e.target.id==='typeans'){{e.preventDefault();show();}}return;}}
  if(e.ctrlKey&&!e.altKey&&/^Digit[1-7]$/.test(e.code)){{e.preventDefault();act('flag',+e.code.slice(5));return;}}
@@ -734,7 +820,7 @@ const FL={js(flash.lstrip('!'))};if(FL)toast(FL);
 window.FC_AFTER_UNDO='/study/{did}';
 window.addEventListener('pageshow',e=>{{if(e.persisted)sent=false;}});
 </script>{whiteboard.study_script(wb)}"""
-    return page("Study", body, user, "decks")
+    return page(t("Study"), body, user, "decks")
 
 @app.post("/study/{did}/typeans")
 def study_typeans(request: Request, did: int, card_id: int = Form(...), typed: str = Form("")):
@@ -770,7 +856,8 @@ def study_answer(request: Request, did: int, card_id: int = Form(...), rating: i
             msgs = []
             if leech:   # same notice as Anki's reviewer
                 card.load()
-                msgs.append("Card was a leech." + (" It has been suspended." if card.queue < 0 else ""))
+                msgs.append(t("Card was a leech. It has been suspended.") if card.queue < 0
+                            else t("Card was a leech."))
             tb = timebox_answered(request, col, did)
             if tb:
                 msgs.append(tb)
@@ -825,39 +912,42 @@ def cards_panel(col, note, back):
     marked = note.has_tag("marked")
     eb = html.escape(back)
     def btn(cid, action, label, cls="", arg="", confirm=""):
-        oc = f' onsubmit="return confirm(\'{confirm}\')"' if confirm else ""
+        oc = f' onsubmit="return confirm({html.escape(js(confirm))})"' if confirm else ""
         return (f'<form method="post" action="/card/{cid}/action"{oc}><input type="hidden" name="action" value="{action}">'
                 f'<input type="hidden" name="arg" value="{arg}"><input type="hidden" name="back" value="{eb}">'
-                f'<button class="{cls}">{label}</button></form>')
+                f'<button class="{cls}">{h(label)}</button></form>')
     rows = []
     for card in note.cards():
         tmpl = card.template()["name"]
         flag = card.user_flag()
-        state = card_state(card)
+        state = t(card_state(card)) if card_state(card) else ""
         due = ""
         if card.queue == 2 or (card.queue in (-1, -2, -3) and card.type == 2):
             days = card.due - col.sched.today
-            due = "due today" if days == 0 else (f"due in {days} d" if days > 0 else f"overdue {-days} d")
-        flag_opts = "".join(f'<option value="{n}" {"selected" if n == flag else ""}>{t}</option>' for n, t, _ in FLAGS)
-        susp = btn(card.id, "unsuspend", "Unsuspend") if card.queue == -1 else btn(card.id, "suspend", "Suspend")
-        bury = btn(card.id, "unbury", "Unbury") if card.queue in (-2, -3) else btn(card.id, "bury", "Bury")
+            due = (t("due today") if days == 0 else
+                   (t("due in {n} d", n=days) if days > 0 else t("overdue {n} d", n=-days)))
+        flag_opts = "".join(f'<option value="{n}" {"selected" if n == flag else ""}>{h(t(name))}</option>'
+                            for n, name, _ in FLAGS)
+        susp = (btn(card.id, "unsuspend", t("Unsuspend")) if card.queue == -1
+                else btn(card.id, "suspend", t("Suspend")))
+        bury = btn(card.id, "unbury", t("Unbury")) if card.queue in (-2, -3) else btn(card.id, "bury", t("Bury"))
         rows.append(f"""<div class="cardrow" style="border-left:6px solid {FLAG_COLOR[flag] if flag else 'var(--line)'}">
 <div class="row" style="justify-content:space-between"><b>{html.escape(tmpl)}</b>
-<span class="muted" style="font-size:14px">{flag_dot(flag)} {state}{' · ' + due if due else ''}
+<span class="muted" style="font-size:14px">{flag_dot(flag)} {h(state)}{' · ' + h(due) if due else ''}
 · <a href="/browse?q=cid:{card.id}" class="muted">{html.escape(col.decks.name(card.did))}</a></span></div>
 <div class="row" style="margin-top:8px">{susp}{bury}
 <form method="post" action="/card/{card.id}/action" class="row" style="gap:6px"><input type="hidden" name="action" value="flag">
-<input type="hidden" name="back" value="{eb}"><select name="arg" aria-label="Flag" style="width:auto"
+<input type="hidden" name="back" value="{eb}"><select name="arg" aria-label="{html.escape(t("Flag"))}" style="width:auto"
 onchange="this.form.submit()">{flag_opts}</select></form>
 <form method="post" action="/card/{card.id}/action" class="row" style="gap:6px"><input type="hidden" name="action" value="due">
-<input type="hidden" name="back" value="{eb}"><input name="arg" placeholder="days, e.g. 1 or 3-7" style="width:150px"
-aria-label="Due in days" required><button>Set due</button></form>
-{btn(card.id, "reset", "Reset to new", "danger", confirm="Reset this card to new?")}
-<a class="btn" href="/card/{card.id}/info?back={html.escape(quote(back, safe='/'))}">Card info</a></div></div>""")
+<input type="hidden" name="back" value="{eb}"><input name="arg" placeholder="{html.escape(t("days, e.g. 1 or 3-7"))}" style="width:150px"
+aria-label="{html.escape(t("Due in days"))}" required><button>{h(t("Set due"))}</button></form>
+{btn(card.id, "reset", t("Reset to new"), "danger", confirm=t("Reset this card to new?"))}
+<a class="btn" href="/card/{card.id}/info?back={html.escape(quote(back, safe='/'))}">{h(t("Card info"))}</a></div></div>""")
     first = note.cards()[0].id if note.cards() else 0
-    mark = btn(first, "mark", "★ Unmark note" if marked else "☆ Mark note") if first else ""
+    mark = btn(first, "mark", t("★ Unmark note") if marked else t("☆ Mark note")) if first else ""
     return f"""<style>.cardrow{{padding:12px 14px;border:1px solid var(--line);border-radius:12px;margin-top:10px}}</style>
-<div class="box"><div class="row" style="justify-content:space-between"><h3 style="margin:0">Cards</h3>{mark}</div>
+<div class="box"><div class="row" style="justify-content:space-between"><h3 style="margin:0">{h(t("Cards"))}</h3>{mark}</div>
 {''.join(rows)}</div>"""
 
 @app.post("/note/{nid}/delete")
@@ -866,7 +956,7 @@ def note_delete(request: Request, nid: int, back: str = "/browse"):
     if not user: return need_login(request)
     with collection(user) as col:
         col.remove_notes([nid])
-    set_flash(request, "Note deleted.")
+    set_flash(request, t("Note deleted."))
     return RedirectResponse(safe_back(back), 303)
 
 # ---------- browse ----------
@@ -935,9 +1025,9 @@ def note_state(col, cards):
     if not cards: return "", 0, ""
     states = [card_state(c) for c in cards]
     nsusp = states.count("Suspended")
-    text, cls = states[0], ""
-    if nsusp == len(cards): text, cls = "Suspended", "susp"
-    elif nsusp: text = f"{states[0] if states[0] != 'Suspended' else 'New'} · {nsusp} suspended"
+    text, cls = (t(states[0]) if states[0] else ""), ""
+    if nsusp == len(cards): text, cls = t("Suspended"), "susp"
+    elif nsusp: text = t("{state} · {n} suspended", state=t(states[0] if states[0] != "Suspended" else "New"), n=nsusp)
     return text, next((c.user_flag() for c in cards if c.user_flag()), 0), cls
 
 @app.get("/browse", response_class=HTMLResponse)
@@ -965,11 +1055,13 @@ def browse(request: Request, q: str = "", page_no: int = 0, mode: str = "", sort
         page_no = max(0, min(page_no, (total - 1) // per if total else 0))
         here = browse_url(q, page_no)
         qback = html.escape(quote(here, safe="/"))
+        empty, info_label, select_label = h(t("(empty)")), html.escape(t("Card info")), html.escape(t("Select"))
+        marked_star = f' <span title="{html.escape(t("Marked"))}" style="color:#c98a16">★</span>'
         rows = []
         for id_ in ids[page_no * per:(page_no + 1) * per]:
             try:
                 cells, color, _, _ = col.browser_row_for_id(id_)
-                cells = [re.sub(r"[⁨⁩]", "", t) for t, _, _ in cells]
+                cells = [re.sub(r"[⁨⁩]", "", text) for text, _, _ in cells]
             except Exception:   # removed between search and render
                 continue
             if notes:
@@ -982,19 +1074,20 @@ def browse(request: Request, q: str = "", page_no: int = 0, mode: str = "", sort
             else:
                 card = col.get_card(id_)
                 state, flag, nid, info_cid = card_state(card), card.user_flag(), card.nid, id_
-                marked = "marked" in [t.lower() for t in card.note().tags]
+                state = t(state) if state else ""
+                marked = "marked" in [tag.lower() for tag in card.note().tags]
                 cls = ROW_COLOR_CLASS.get(color, "")
             tds = []
             for i, (key, text) in enumerate(zip(cols, cells)):
                 right = all_cols[key].alignment == 1 if key in all_cols else False
                 txt = html.escape(text[:120])
                 if i == 0:
-                    txt = f'<a class="deck" href="/edit/{nid}?back={qback}">{txt or "(empty)"}</a>'
+                    txt = f'<a class="deck" href="/edit/{nid}?back={qback}">{txt or empty}</a>'
                 tds.append(f'<td class="{"num" if right else ""}">{txt}</td>')
-            info = (f'<a class="info-link" title="Card info" aria-label="Card info" '
+            info = (f'<a class="info-link" title="{info_label}" aria-label="{info_label}" '
                     f'href="/card/{info_cid}/info?back={qback}">ⓘ</a>') if info_cid else ""
             rows.append(f"""<tr class="{cls.strip()}"><td class="sel"><input type="checkbox" name="ids" value="{id_}"
-aria-label="Select"></td>{''.join(tds)}<td class="muted state">{flag_dot(flag)}{' <span title="Marked" style="color:#c98a16">★</span>' if marked else ''} {state}</td><td>{info}</td></tr>""")
+aria-label="{select_label}"></td>{''.join(tds)}<td class="muted state">{flag_dot(flag)}{marked_star if marked else ''} {h(state)}</td><td>{info}</td></tr>""")
         heads = []
         for key in cols:
             c = all_cols.get(key)
@@ -1019,14 +1112,28 @@ aria-label="Select"></td>{''.join(tds)}<td class="muted state">{flag_dot(flag)}{
     nav = ""
     if total > per:
         last = (total - 1) // per
-        nav = '<div class="row">' + (f'<a class="btn" href="{html.escape(browse_url(q, page_no - 1))}">← Prev</a>' if page_no else "") \
-            + f'<span class="muted">Page {page_no + 1} of {last + 1}</span>' \
-            + (f'<a class="btn" href="{html.escape(browse_url(q, page_no + 1))}">Next →</a>' if page_no < last else "") + "</div>"
-    unit = "notes" if notes else "cards"
-    seg = "".join(f'<a class="btn{" primary" if m == mode else ""}" href="{html.escape(browse_url(q, 0, mode=m))}">{m.title()}</a>'
+        nav = '<div class="row">' + (f'<a class="btn" href="{html.escape(browse_url(q, page_no - 1))}">{h(t("← Prev"))}</a>' if page_no else "") \
+            + f'<span class="muted">{h(t("Page {page} of {pages}", page=page_no + 1, pages=last + 1))}</span>' \
+            + (f'<a class="btn" href="{html.escape(browse_url(q, page_no + 1))}">{h(t("Next →"))}</a>' if page_no < last else "") + "</div>"
+    # Texts that name the rows: notes in notes mode, cards in cards mode (whole sentences for translators).
+    # English has always said "1 notes" here, so both English forms are the same (tests compare it).
+    if notes:
+        count_text = tn("{n} notes", "{n} notes", total)
+        all_text = tn("All {n} notes in this search", "All {n} notes in this search", total)
+        js_none = t("Select some notes first (tick the boxes, or “All”).")
+        js_delete = t("Delete the notes of the {n} selected notes? This removes all their cards.")
+        js_reset = t("Reset {n} notes to new? Review history is kept.")
+    else:
+        count_text = tn("{n} cards", "{n} cards", total)
+        all_text = tn("All {n} cards in this search", "All {n} cards in this search", total)
+        js_none = t("Select some cards first (tick the boxes, or “All”).")
+        js_delete = t("Delete the notes of the {n} selected cards? This removes all their cards.")
+        js_reset = t("Reset {n} cards to new? Review history is kept.")
+    seg_labels = {"cards": t("Cards"), "notes": t("Notes")}
+    seg = "".join(f'<a class="btn{" primary" if m == mode else ""}" href="{html.escape(browse_url(q, 0, mode=m))}">{h(seg_labels[m])}</a>'
                   for m in ("cards", "notes"))
     deck_opts = "".join(f'<option value="{d.id}">{html.escape(d.name)}</option>' for d in decks)
-    flag_opts = "".join(f'<option value="{n}">{t}</option>' for n, t, _ in FLAGS)
+    flag_opts = "".join(f'<option value="{n}">{h(t(name))}</option>' for n, name, _ in FLAGS)
     field_opts = "".join(f'<option value="{html.escape(f)}">{html.escape(f)}</option>' for f in fields)
     eq = html.escape(q)
     body = f"""<style>{BROWSE_ROW_CSS}
@@ -1043,68 +1150,70 @@ details.panel>summary{{cursor:pointer;list-style:none;display:inline-block}}deta
 .bar{{position:sticky;top:calc(65px + env(safe-area-inset-top));z-index:4}}.arg{{display:none}}.arg.show{{display:flex}}.bar select,.bar input[type=text],
 .bar input[type=number]{{width:auto;min-height:44px}}</style>
 <div class="box"><form class="row" action="/browse">{sidebar_mod.OPEN_BUTTON}<input name="q" value="{eq}" style="flex:1;min-width:220px"
-placeholder="Search (Anki syntax: deck:French is:due tag:verb front:*cat*)"><button>Search</button></form>
+placeholder="{html.escape(t("Search (Anki syntax: deck:French is:due tag:verb front:*cat*)"))}"><button>{h(t("Search"))}</button></form>
 <div class="row" style="margin-top:10px;justify-content:space-between">
-<span class="muted">{total} {unit}{(' · ' + html.escape(err)) if err else ''}</span>
-<div class="row"><div class="row seg" role="group" aria-label="Show">{seg}</div>
-<a class="btn" href="/filtered/new?search={quote(q)}" title="Create a filtered deck from this search">Filtered deck</a>
-<a class="btn" href="/export?q={quote(q)}" title="Export the notes in this search">Export</a>
-<a class="btn" href="/browse/dupes?search={quote(q)}" title="Find notes with the same field">Find duplicates</a>
-<details class="panel"><summary class="btn">Columns ▾</summary></details></div></div>
+<span class="muted">{h(count_text)}{(' · ' + html.escape(err)) if err else ''}</span>
+<div class="row"><div class="row seg" role="group" aria-label="{html.escape(t("Show"))}">{seg}</div>
+<a class="btn" href="/filtered/new?search={quote(q)}" title="{html.escape(t("Create a filtered deck from this search"))}">{h(t("Filtered deck"))}</a>
+<a class="btn" href="/export?q={quote(q)}" title="{html.escape(t("Export the notes in this search"))}">{h(t("Export"))}</a>
+<a class="btn" href="/browse/dupes?search={quote(q)}" title="{html.escape(t("Find notes with the same field"))}">{h(t("Find duplicates"))}</a>
+<details class="panel"><summary class="btn">{h(t("Columns ▾"))}</summary></details></div></div>
 <form id="colsform" method="post" action="/browse/columns" style="display:none;margin-top:10px">
 <input type="hidden" name="mode" value="{mode}"><input type="hidden" name="back" value="{html.escape(here)}">
-<div class="colgrid">{col_opts}</div><p class="row" style="margin-bottom:0"><button class="primary">Save columns</button>
-<button name="reset" value="1">Default columns</button></p></form></div>
+<div class="colgrid">{col_opts}</div><p class="row" style="margin-bottom:0"><button class="primary">{h(t("Save columns"))}</button>
+<button name="reset" value="1">{h(t("Default columns"))}</button></p></form></div>
 <form id="bulk" method="post" action="/browse/bulk">
 <input type="hidden" name="mode" value="{mode}"><input type="hidden" name="q" value="{eq}">
 <input type="hidden" name="back" value="{html.escape(here)}">
 <div class="box bar"><div class="row">
-<b id="nsel">0 selected</b>
-<label class="chk" style="padding:0 6px"><input type="checkbox" name="all" value="1" id="allq">All {total} {unit} in this search</label>
-<select name="op" id="op" aria-label="Action">
-<option value="">Action…</option><option value="deck">Change deck</option><option value="add_tags">Add tags</option>
-<option value="remove_tags">Remove tags</option><option value="suspend">Suspend</option><option value="unsuspend">Unsuspend</option>
-<option value="flag">Flag</option><option value="due">Set due date</option><option value="reset">Reset to new</option>
-<option value="reposition">Reposition new cards</option><option value="notetype">Change note type</option>
-<option value="delete">Delete notes</option></select>
-<span class="arg row" data-op="deck"><select name="deck" aria-label="Deck">{deck_opts}</select></span>
-<span class="arg row" data-op="add_tags remove_tags"><input type="text" name="tags" placeholder="tags, space separated" aria-label="Tags"></span>
-<span class="arg row" data-op="flag"><select name="flag" aria-label="Flag">{flag_opts}</select></span>
-<span class="arg row" data-op="due"><input type="text" name="days" placeholder="days: 0, 1, 3-7, 5!" aria-label="Due in days" style="width:170px"></span>
-<span class="arg row" data-op="reposition"><label class="chk" style="padding:0">Start <input type="number" name="start" value="0" min="0" style="width:90px;height:auto"></label>
-<label class="chk" style="padding:0">Step <input type="number" name="step" value="1" min="1" style="width:80px;height:auto"></label>
-<label class="chk"><input type="checkbox" name="randomize" value="1">Randomize</label>
-<label class="chk"><input type="checkbox" name="shift" value="1">Shift existing</label></span>
-<button class="primary" id="apply">Apply</button></div>
-<details class="panel" style="margin-top:10px"><summary class="btn">Find and replace ▾</summary>
-<div class="row" style="margin-top:10px"><input type="text" name="find" placeholder="Find" aria-label="Find" style="flex:1;min-width:160px">
-<input type="text" name="replace" placeholder="Replace with" aria-label="Replace with" style="flex:1;min-width:160px">
-<select name="field" aria-label="In"><option value="">All fields</option><option value="__tags__">Tags</option>{field_opts}</select>
-<label class="chk"><input type="checkbox" name="regex" value="1">Regex</label>
-<label class="chk"><input type="checkbox" name="match_case" value="1">Match case</label>
-<button name="do_replace" value="1">Replace</button></div>
-<p class="muted" style="font-size:14px;margin-bottom:0">Works on the selected notes (or every note in the search when “All” is ticked).</p></details></div>
+<b id="nsel">{h(t("{n} selected", n=0))}</b>
+<label class="chk" style="padding:0 6px"><input type="checkbox" name="all" value="1" id="allq">{h(all_text)}</label>
+<select name="op" id="op" aria-label="{html.escape(t("Action"))}">
+<option value="">{h(t("Action…"))}</option><option value="deck">{h(t("Change deck"))}</option><option value="add_tags">{h(t("Add tags"))}</option>
+<option value="remove_tags">{h(t("Remove tags"))}</option><option value="suspend">{h(t("Suspend"))}</option><option value="unsuspend">{h(t("Unsuspend"))}</option>
+<option value="flag">{h(t("Flag"))}</option><option value="due">{h(t("Set due date"))}</option><option value="reset">{h(t("Reset to new"))}</option>
+<option value="reposition">{h(t("Reposition new cards"))}</option><option value="notetype">{h(t("Change note type"))}</option>
+<option value="delete">{h(t("Delete notes"))}</option></select>
+<span class="arg row" data-op="deck"><select name="deck" aria-label="{html.escape(t("Deck"))}">{deck_opts}</select></span>
+<span class="arg row" data-op="add_tags remove_tags"><input type="text" name="tags" placeholder="{html.escape(t("tags, space separated"))}" aria-label="{html.escape(t("Tags"))}"></span>
+<span class="arg row" data-op="flag"><select name="flag" aria-label="{html.escape(t("Flag"))}">{flag_opts}</select></span>
+<span class="arg row" data-op="due"><input type="text" name="days" placeholder="{html.escape(t("days: 0, 1, 3-7, 5!"))}" aria-label="{html.escape(t("Due in days"))}" style="width:170px"></span>
+<span class="arg row" data-op="reposition"><label class="chk" style="padding:0">{h(t("Start"))} <input type="number" name="start" value="0" min="0" style="width:90px;height:auto"></label>
+<label class="chk" style="padding:0">{h(t("Step"))} <input type="number" name="step" value="1" min="1" style="width:80px;height:auto"></label>
+<label class="chk"><input type="checkbox" name="randomize" value="1">{h(t("Randomize"))}</label>
+<label class="chk"><input type="checkbox" name="shift" value="1">{h(t("Shift existing"))}</label></span>
+<button class="primary" id="apply">{h(t("Apply"))}</button></div>
+<details class="panel" style="margin-top:10px"><summary class="btn">{h(t("Find and replace ▾"))}</summary>
+<div class="row" style="margin-top:10px"><input type="text" name="find" placeholder="{html.escape(t("Find"))}" aria-label="{html.escape(t("Find"))}" style="flex:1;min-width:160px">
+<input type="text" name="replace" placeholder="{html.escape(t("Replace with"))}" aria-label="{html.escape(t("Replace with"))}" style="flex:1;min-width:160px">
+<select name="field" aria-label="{html.escape(t("In"))}"><option value="">{h(t("All fields"))}</option><option value="__tags__">{h(t("Tags"))}</option>{field_opts}</select>
+<label class="chk"><input type="checkbox" name="regex" value="1">{h(t("Regex"))}</label>
+<label class="chk"><input type="checkbox" name="match_case" value="1">{h(t("Match case"))}</label>
+<button name="do_replace" value="1">{h(t("Replace"))}</button></div>
+<p class="muted" style="font-size:14px;margin-bottom:0">{h(t("Works on the selected notes (or every note in the search when “All” is ticked)."))}</p></details></div>
 <div class="box" style="overflow-x:auto;padding:8px"><table class="btable"><tr><th class="sel"><input type="checkbox" id="selall"
-aria-label="Select all on this page"></th>{''.join(heads)}<th>State</th><th></th></tr>{''.join(rows)}</table></div></form>{nav}
+aria-label="{html.escape(t("Select all on this page"))}"></th>{''.join(heads)}<th>{h(t("State"))}</th><th></th></tr>{''.join(rows)}</table></div></form>{nav}
 <script>
 const bulk=document.getElementById('bulk'),op=document.getElementById('op'),allq=document.getElementById('allq');
 const boxes=()=>[...bulk.querySelectorAll('input[name=ids]')];
+const MSG={js({"sel": t("{n} selected"), "none": js_none, "choose": t("Choose an action."),
+              "del": js_delete, "reset": js_reset})};
 function count(){{const n=allq.checked?{total}:boxes().filter(b=>b.checked).length;
- document.getElementById('nsel').textContent=n+' selected';}}
+ document.getElementById('nsel').textContent=MSG.sel.replace('{{n}}',n);}}
 document.getElementById('selall').onchange=e=>{{boxes().forEach(b=>b.checked=e.target.checked);count();}};
 bulk.addEventListener('change',e=>{{if(e.target.name==='ids'||e.target===allq)count();}});
 op.onchange=()=>document.querySelectorAll('.arg').forEach(a=>a.classList.toggle('show',a.dataset.op.split(' ').includes(op.value)));
 bulk.onsubmit=e=>{{const n=allq.checked?{total}:boxes().filter(b=>b.checked).length;
  const rep=e.submitter&&e.submitter.name==='do_replace';
- if(!n){{e.preventDefault();alert('Select some {unit} first (tick the boxes, or “All”).');return;}}
- if(!rep&&!op.value){{e.preventDefault();alert('Choose an action.');return;}}
- if(!rep&&op.value==='delete'&&!confirm('Delete the notes of the '+n+' selected {unit}? This removes all their cards.'))e.preventDefault();
- if(!rep&&op.value==='reset'&&!confirm('Reset '+n+' {unit} to new? Review history is kept.'))e.preventDefault();}};
+ if(!n){{e.preventDefault();alert(MSG.none);return;}}
+ if(!rep&&!op.value){{e.preventDefault();alert(MSG.choose);return;}}
+ if(!rep&&op.value==='delete'&&!confirm(MSG.del.replace('{{n}}',n)))e.preventDefault();
+ if(!rep&&op.value==='reset'&&!confirm(MSG.reset.replace('{{n}}',n)))e.preventDefault();}};
 bulk.querySelectorAll('input[name=find],input[name=replace]').forEach(i=>i.addEventListener('keydown',e=>{{
  if(e.key==='Enter'){{e.preventDefault();bulk.querySelector('button[name=do_replace]').click();}}}}));
 const cp=document.querySelector('details.panel');cp.ontoggle=()=>document.getElementById('colsform').style.display=cp.open?'block':'none';
 </script>"""
-    return page("Browse", sidebar_mod.layout(side, body), user, "browse", take_flash(request))
+    return page(t("Browse"), sidebar_mod.layout(side, body), user, "browse", take_flash(request))
 
 def safe_back(back, default="/browse"):
     return back if back.startswith("/") and not back.startswith("//") else default
@@ -1121,7 +1230,7 @@ async def browse_set_columns(request: Request):
         if form.get("reset") or not cols:
             cols = BROWSE_DEFAULT_COLS["notes" if notes else "cards"]
         (col.set_browser_note_columns if notes else col.set_browser_card_columns)(cols)
-    set_flash(request, "Columns saved.")
+    set_flash(request, t("Columns saved."))
     return RedirectResponse(safe_back(str(form.get("back", ""))), 303)
 
 def bulk_targets(col, form):
@@ -1143,65 +1252,70 @@ def bulk_targets(col, form):
 
 def bulk_action(col, form, cids, nids):
     """Run one of the browser's bulk actions through the engine; returns a short message."""
-    plural = lambda n, w: f"{n} {w}{'' if n == 1 else 's'}"
     if form.get("do_replace"):
         find, repl = str(form.get("find", "")), str(form.get("replace", ""))
-        if not find: raise ValueError("Enter the text to find.")
+        if not find: raise ValueError(t("Enter the text to find."))
         regex, case = bool(form.get("regex")), bool(form.get("match_case"))
         field = str(form.get("field", ""))
         if regex:
             try: re.compile(find)
-            except re.error as e: raise ValueError(f"Bad regular expression: {e}")
+            except re.error as e: raise ValueError(t("Bad regular expression: {error}", error=str(e)))
         if field == "__tags__":
             n = col.tags.find_and_replace(nids, find, repl, regex, case).count
         else:
             n = col.find_and_replace(note_ids=nids, search=find, replacement=repl, regex=regex,
                                      field_name=field or None, match_case=case).count
-        return f"{plural(n, 'note')} updated."
+        return tn("{n} note updated.", "{n} notes updated.", n)
     op = str(form.get("op", ""))
+    nc = len(cids)
     if op == "deck":
         did = int(form.get("deck", 0) or 0)
         if not col.decks.get(did, default=False) or col.decks.is_filtered(did):
-            raise ValueError("Choose a normal deck.")
+            raise ValueError(t("Choose a normal deck."))
         col.set_deck(cids, did)
-        return f"Moved {plural(len(cids), 'card')} to {col.decks.name(did)}."
+        return tn("Moved {n} card to {deck}.", "Moved {n} cards to {deck}.", nc, deck=col.decks.name(did))
     if op in ("add_tags", "remove_tags"):
         tags = " ".join(str(form.get("tags", "")).split())
-        if not tags: raise ValueError("Enter one or more tags.")
+        if not tags: raise ValueError(t("Enter one or more tags."))
         if op == "add_tags":
-            n = col.tags.bulk_add(nids, tags).count; return f"Tags added to {plural(n, 'note')}."
-        n = col.tags.bulk_remove(nids, tags).count; return f"Tags removed from {plural(n, 'note')}."
+            n = col.tags.bulk_add(nids, tags).count
+            return tn("Tags added to {n} note.", "Tags added to {n} notes.", n)
+        n = col.tags.bulk_remove(nids, tags).count
+        return tn("Tags removed from {n} note.", "Tags removed from {n} notes.", n)
     if op == "suspend":
-        col.sched.suspend_cards(cids); return f"{plural(len(cids), 'card')} suspended."
+        col.sched.suspend_cards(cids); return tn("{n} card suspended.", "{n} cards suspended.", nc)
     if op == "unsuspend":
-        col.sched.unsuspend_cards(cids); return f"{plural(len(cids), 'card')} unsuspended."
+        col.sched.unsuspend_cards(cids); return tn("{n} card unsuspended.", "{n} cards unsuspended.", nc)
     if op == "flag":
         flag = int(form.get("flag", 0) or 0)
-        if not 0 <= flag <= 7: raise ValueError("Unknown flag.")
+        if not 0 <= flag <= 7: raise ValueError(t("Unknown flag."))
         col.set_user_flag_for_cards(flag, cids)
-        return f"Flag {FLAG_NAME[flag].lower()} set on {plural(len(cids), 'card')}." if flag else "Flags removed."
+        if not flag:
+            return t("Flags removed.")
+        return tn("Flag {flag} set on {n} card.", "Flag {flag} set on {n} cards.", nc,
+                  flag=t(FLAG_NAME[flag]).lower())
     if op == "due":
         days = str(form.get("days", "")).strip().replace(" ", "")
         if not re.fullmatch(r"\d+(-\d+)?!?", days):
-            raise ValueError("Due date: enter days like 0 (today), 1, 3-7, or 5! to also set the interval.")
+            raise ValueError(t("Due date: enter days like 0 (today), 1, 3-7, or 5! to also set the interval."))
         col.sched.set_due_date(cids, days)
-        return f"Due date set for {plural(len(cids), 'card')}."
+        return tn("Due date set for {n} card.", "Due date set for {n} cards.", nc)
     if op == "reset":
         col.sched.schedule_cards_as_new(cids, restore_position=True, reset_counts=False)
-        return f"{plural(len(cids), 'card')} reset to new."
+        return tn("{n} card reset to new.", "{n} cards reset to new.", nc)
     if op == "reposition":
         new = col.db.list(f"select id from cards where type=0 and id in {ids2str(cids)} order by due, ord")
-        if not new: raise ValueError("Only new cards can be repositioned.")
+        if not new: raise ValueError(t("Only new cards can be repositioned."))
         start, step = int(form.get("start", 0) or 0), int(form.get("step", 1) or 1)
-        if start < 0 or step < 1: raise ValueError("Start must be 0 or more and step 1 or more.")
+        if start < 0 or step < 1: raise ValueError(t("Start must be 0 or more and step 1 or more."))
         n = col.sched.reposition_new_cards(new, starting_from=start, step_size=step,
                                            randomize=bool(form.get("randomize")),
                                            shift_existing=bool(form.get("shift"))).count
-        return f"{plural(n, 'new card')} repositioned."
+        return tn("{n} new card repositioned.", "{n} new cards repositioned.", n)
     if op == "delete":
         n = col.remove_notes(nids).count
-        return f"{plural(n, 'note')} deleted."
-    raise ValueError("Choose an action.")
+        return tn("{n} note deleted.", "{n} notes deleted.", n)
+    raise ValueError(t("Choose an action."))
 
 @app.post("/browse/bulk")
 async def browse_bulk(request: Request):
@@ -1212,14 +1326,14 @@ async def browse_bulk(request: Request):
     with collection(user) as col:
         try:
             cids, nids = bulk_targets(col, form)
-            if not cids and not nids: raise ValueError("Nothing selected.")
+            if not cids and not nids: raise ValueError(t("Nothing selected."))
             if form.get("op") == "notetype" and not form.get("do_replace"):
                 # Anki's Change Note Type dialog: its own page, which comes back here afterwards.
                 sel = f"q={quote(str(form.get('q', '')))}" if form.get("all") else f"nids={','.join(map(str, nids))}"
                 return RedirectResponse(f"/notetypes/change?{sel}&back={quote(back)}", 303)
             msg = bulk_action(col, form, cids, nids)
         except Exception as e:
-            msg = "!" + (str(e) or "That did not work.")
+            msg = "!" + (str(e) or t("That did not work."))
     set_flash(request, msg)
     return RedirectResponse(back, 303)
 
@@ -1231,42 +1345,43 @@ def settings(request: Request):
     with collection(user) as col:
         fsrs = col.get_config("fsrs", True)
     users = load_users()
-    body = f"""<div class="box row" style="justify-content:space-between"><div><h3 style="margin:0">Sync</h3>
-<span class="muted">Your devices always share the same cards. Sync with AnkiDroid, AnkiMobile or desktop Anki.</span></div>
-<a class="btn" href="/sync">Sync</a></div>
-<div class="box row" style="justify-content:space-between"><div><h3 style="margin:0">Preferences</h3>
-<span class="muted">Next day starts at, learn ahead, timebox, review screen, theme.</span></div>
-<a class="btn" href="/preferences">Preferences</a></div>
-<div class="box row" style="justify-content:space-between"><div><h3 style="margin:0">Study reminders</h3>
-<span class="muted">A daily notification on your iPad or Chromebook when cards are due.</span></div>
-<a class="btn" href="/reminders">Reminders</a></div>
-<div class="box row" style="justify-content:space-between"><div><h3 style="margin:0">Add-ons</h3>
-<span class="muted">Small server add-ons for this app. Desktop Anki add-ons don't run here.</span></div>
-<a class="btn" href="/addons">Add-ons</a></div>
-<div class="box row" style="justify-content:space-between"><h3 style="margin:0">Note types</h3>
-<a class="btn" href="/notetypes">Manage note types</a></div>
-<div class="box row" style="justify-content:space-between"><div><h3 style="margin:0">Media</h3>
-<span class="muted">Find missing and unused pictures and sounds.</span></div>
-<a class="btn" href="/check-media">Check media</a></div>
-<div class="box row" style="justify-content:space-between"><div><h3 style="margin:0">Check database</h3>
-<span class="muted">Find and fix problems in your collection.</span></div>
-<a class="btn" href="/check-database">Check database</a></div>
-<div class="box row" style="justify-content:space-between"><div><h3 style="margin:0">Empty cards</h3>
-<span class="muted">Find and delete cards with a blank front.</span></div>
-<a class="btn" href="/empty-cards">Empty cards</a></div>
-<div class="box row" style="justify-content:space-between"><div><h3 style="margin:0">Backups</h3>
+    fsrs_state = f"<b>{h(t('on') if fsrs else t('off'))}</b>"
+    body = f"""<div class="box row" style="justify-content:space-between"><div><h3 style="margin:0">{h(t("Sync"))}</h3>
+<span class="muted">{h(t("Your devices always share the same cards. Sync with AnkiDroid, AnkiMobile or desktop Anki."))}</span></div>
+<a class="btn" href="/sync">{h(t("Sync"))}</a></div>
+<div class="box row" style="justify-content:space-between"><div><h3 style="margin:0">{h(t("Preferences"))}</h3>
+<span class="muted">{h(t("Next day starts at, learn ahead, timebox, review screen, theme."))}</span></div>
+<a class="btn" href="/preferences">{h(t("Preferences"))}</a></div>
+<div class="box row" style="justify-content:space-between"><div><h3 style="margin:0">{h(t("Study reminders"))}</h3>
+<span class="muted">{h(t("A daily notification on your iPad or Chromebook when cards are due."))}</span></div>
+<a class="btn" href="/reminders">{h(t("Reminders"))}</a></div>
+<div class="box row" style="justify-content:space-between"><div><h3 style="margin:0">{h(t("Add-ons"))}</h3>
+<span class="muted">{h(t("Small server add-ons for this app. Desktop Anki add-ons don't run here."))}</span></div>
+<a class="btn" href="/addons">{h(t("Add-ons"))}</a></div>
+<div class="box row" style="justify-content:space-between"><h3 style="margin:0">{h(t("Note types"))}</h3>
+<a class="btn" href="/notetypes">{h(t("Manage note types"))}</a></div>
+<div class="box row" style="justify-content:space-between"><div><h3 style="margin:0">{h(t("Media"))}</h3>
+<span class="muted">{h(t("Find missing and unused pictures and sounds."))}</span></div>
+<a class="btn" href="/check-media">{h(t("Check media"))}</a></div>
+<div class="box row" style="justify-content:space-between"><div><h3 style="margin:0">{h(t("Check database"))}</h3>
+<span class="muted">{h(t("Find and fix problems in your collection."))}</span></div>
+<a class="btn" href="/check-database">{h(t("Check database"))}</a></div>
+<div class="box row" style="justify-content:space-between"><div><h3 style="margin:0">{h(t("Empty cards"))}</h3>
+<span class="muted">{h(t("Find and delete cards with a blank front."))}</span></div>
+<a class="btn" href="/empty-cards">{h(t("Empty cards"))}</a></div>
+<div class="box row" style="justify-content:space-between"><div><h3 style="margin:0">{h(t("Backups"))}</h3>
 <span class="muted">{html.escape(maintenance.latest_backup_line(user))}</span></div>
-<a class="btn" href="/backups">Backups and restore</a></div>
-<div class="box"><h3 style="margin-top:0">Scheduler</h3><form method="post" action="/settings/fsrs" class="row">
-<span style="flex:1">FSRS scheduling (Anki's modern algorithm) is <b>{'on' if fsrs else 'off'}</b>.</span>
-<button>{'Turn off (use SM-2)' if fsrs else 'Turn on'}</button></form></div>
-<div class="box"><h3 style="margin-top:0">Change password</h3><form method="post" action="/settings/password">
-<label>New password</label><input name="pw" type="password" minlength="6" required><p><button>Change</button></p></form></div>
-<div class="box"><h3 style="margin-top:0">Add another person</h3><p class="muted">Each person gets their own separate cards.
-{len(users)} account(s) so far.</p><form method="post" action="/settings/adduser">
-<div class="row"><input name="username" placeholder="Username" style="flex:1" autocapitalize="none" required>
-<input name="pw" type="password" placeholder="Password" minlength="6" style="flex:1" required><button>Create</button></div></form></div>"""
-    return page("Settings", body, user, "settings", take_flash(request))
+<a class="btn" href="/backups">{h(t("Backups and restore"))}</a></div>
+<div class="box"><h3 style="margin-top:0">{h(t("Scheduler"))}</h3><form method="post" action="/settings/fsrs" class="row">
+<span style="flex:1">{ht(t("FSRS scheduling (Anki's modern algorithm) is {state}."), state=fsrs_state)}</span>
+<button>{h(t("Turn off (use SM-2)") if fsrs else t("Turn on"))}</button></form></div>
+<div class="box"><h3 style="margin-top:0">{h(t("Change password"))}</h3><form method="post" action="/settings/password">
+<label>{h(t("New password"))}</label><input name="pw" type="password" minlength="6" required><p><button>{h(t("Change"))}</button></p></form></div>
+<div class="box"><h3 style="margin-top:0">{h(t("Add another person"))}</h3><p class="muted">{h(t("Each person gets their own separate cards."))}
+{h(tn("{n} account(s) so far.", "{n} account(s) so far.", len(users)))}</p><form method="post" action="/settings/adduser">
+<div class="row"><input name="username" placeholder="{html.escape(t("Username"))}" style="flex:1" autocapitalize="none" required>
+<input name="pw" type="password" placeholder="{html.escape(t("Password"))}" minlength="6" style="flex:1" required><button>{h(t("Create"))}</button></div></form></div>"""
+    return page(t("Settings"), body, user, "settings", take_flash(request))
 
 @app.post("/settings/fsrs")
 def toggle_fsrs(request: Request):
@@ -1281,7 +1396,7 @@ def change_pw(request: Request, pw: str = Form(...)):
     user = current_user(request)
     if not user: return need_login(request)
     create_user(user, pw)
-    set_flash(request, "Password changed.")
+    set_flash(request, t("Password changed."))
     return RedirectResponse("/settings", 303)
 
 @app.post("/settings/adduser")
@@ -1290,10 +1405,10 @@ def add_user(request: Request, username: str = Form(...), pw: str = Form(...)):
     if not user: return need_login(request)
     username = username.strip().lower()
     if not re.fullmatch(r"[a-z0-9_.-]{2,32}", username) or username in load_users():
-        set_flash(request, "!That username is invalid or taken.")
+        set_flash(request, "!" + t("That username is invalid or taken."))
     else:
         create_user(username, pw)
-        set_flash(request, f"Account '{username}' created.")
+        set_flash(request, t("Account '{name}' created.", name=username))
     return RedirectResponse("/settings", 303)
 
 @app.get("/healthz")

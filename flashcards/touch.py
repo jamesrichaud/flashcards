@@ -15,6 +15,7 @@ from fastapi.responses import HTMLResponse, Response, PlainTextResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 import app as core
+from flashcards.i18n import t, N_
 
 router = APIRouter()
 
@@ -124,10 +125,23 @@ def head_html(theme):
 # Offline banner: shown while the device says it has no connection, so a tap that can't reach
 # the server isn't a surprise. The service worker needs HTTPS (or localhost); it is skipped
 # quietly elsewhere and the browser's own offline page is shown instead.
-BODY_SCRIPT = """<div id="fc-offline" role="status" hidden>You're offline. Changes can't be saved until the connection is back.</div>
-<script>(function(){const b=document.getElementById('fc-offline');
-function upd(){b.hidden=navigator.onLine!==false;}window.addEventListener('online',upd);window.addEventListener('offline',upd);upd();
-if('serviceWorker' in navigator&&window.isSecureContext)navigator.serviceWorker.register('/sw.js').catch(()=>{});})();</script>"""
+def body_script():
+    """The offline banner and service worker registration, in the request's language.
+    core.page reads it as `touch_mod.BODY_SCRIPT` (see __getattr__ below)."""
+    banner = html.escape(t("You're offline. Changes can't be saved until the connection is back."), False)
+    return f"""<div id="fc-offline" role="status" hidden>{banner}</div>
+<script>(function(){{const b=document.getElementById('fc-offline');
+function upd(){{b.hidden=navigator.onLine!==false;}}window.addEventListener('online',upd);window.addEventListener('offline',upd);upd();
+if('serviceWorker' in navigator&&window.isSecureContext)navigator.serviceWorker.register('/sw.js').catch(()=>{{}});}})();</script>"""
+
+
+def __getattr__(name):
+    # BODY_SCRIPT and OFFLINE_HTML are built on each use so they follow the request's language.
+    if name == "BODY_SCRIPT":
+        return body_script()
+    if name == "OFFLINE_HTML":
+        return offline_html()
+    raise AttributeError(name)
 
 CSS = """
 html{touch-action:manipulation}
@@ -168,8 +182,8 @@ def service_worker():
 
 
 # Self-contained (no login, no outside files) because it is shown when the server is unreachable.
-OFFLINE_HTML = """<!doctype html><html><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Offline</title>
+OFFLINE_TEMPLATE = """<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>%(title)s</title>
 <style>:root{color-scheme:light dark}body{margin:0;font:17px/1.45 -apple-system,system-ui,Segoe UI,Roboto,sans-serif;
 background:#f6f6f4;color:#1d1d1f;display:flex;min-height:100vh;align-items:center;justify-content:center;
 padding:20px env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);box-sizing:border-box}
@@ -180,27 +194,35 @@ min-height:44px;text-decoration:none;cursor:pointer;display:inline-flex;align-it
 .primary{background:#2f6fde;border-color:#2f6fde;color:#fff}
 @media (prefers-color-scheme:dark){body{background:#161617;color:#f2f2f2}.box,button,a{background:#232325;border-color:#38383b;color:#f2f2f2}
 p{color:#a1a1a6}.primary{background:#2f6fde;border-color:#2f6fde;color:#fff}}</style></head><body>
-<div class="box"><h1>You're offline</h1>
-<p>Flashcards can't reach the server. Everything already saved is safe; the last thing you tapped may not have
-been saved. Check the Wi-Fi, then try again.</p>
-<div class="row"><button class="primary" onclick="location.reload()">Try again</button><a href="/">Decks</a></div></div>
+<div class="box"><h1>%(heading)s</h1>
+<p>%(text)s</p>
+<div class="row"><button class="primary" onclick="location.reload()">%(again)s</button><a href="/">%(decks)s</a></div></div>
 </body></html>"""
+
+
+def offline_html():
+    e = lambda s: html.escape(s, False)
+    return OFFLINE_TEMPLATE % {
+        "title": e(t("Offline")), "heading": e(t("You're offline")),
+        "text": e(t("Flashcards can't reach the server. Everything already saved is safe; the last thing you tapped "
+                    "may not have\nbeen saved. Check the Wi-Fi, then try again.")),
+        "again": e(t("Try again")), "decks": e(t("Decks"))}
 
 
 @router.get("/offline", response_class=HTMLResponse)
 def offline():
-    return HTMLResponse(OFFLINE_HTML, headers={"Cache-Control": "no-cache"})
+    return HTMLResponse(offline_html(), headers={"Cache-Control": "no-cache"})
 
 
 # ---------- error pages ----------
 MESSAGES = {
-    401: ("Please log in", "You need to log in to see this page."),
-    403: ("Not allowed", "You can't open this page."),
-    404: ("Page not found", "There's nothing at this address. It may have been deleted, or the link is old."),
-    405: ("Can't open this page", "This page can't be opened like that. Go back and use the buttons on the page."),
-    422: ("Something wasn't right", "Part of the address or the form wasn't understood. Go back and try again."),
-    500: ("Something went wrong", "The server hit a problem. Nothing more was changed. Go back and try again; "
-                                  "if it keeps happening, Settings > Check Database may help."),
+    401: (N_("Please log in"), N_("You need to log in to see this page.")),
+    403: (N_("Not allowed"), N_("You can't open this page.")),
+    404: (N_("Page not found"), N_("There's nothing at this address. It may have been deleted, or the link is old.")),
+    405: (N_("Can't open this page"), N_("This page can't be opened like that. Go back and use the buttons on the page.")),
+    422: (N_("Something wasn't right"), N_("Part of the address or the form wasn't understood. Go back and try again.")),
+    500: (N_("Something went wrong"), N_("The server hit a problem. Nothing more was changed. Go back and try again; "
+                                         "if it keeps happening, Settings > Check Database may help.")),
 }
 
 
@@ -209,15 +231,17 @@ def wants_html(request):
 
 
 def error_page(request, status):
-    title, text = MESSAGES.get(status, MESSAGES[500] if status >= 500 else ("Something wasn't right", MESSAGES[422][1]))
+    title, text = MESSAGES.get(status, MESSAGES[500] if status >= 500 else (MESSAGES[422][0], MESSAGES[422][1]))
+    title, text = t(title), t(text)
     try:
         user = core.current_user(request)
     except Exception:  # noqa: BLE001  (e.g. the session isn't available on a server error)
         user = None
-    body = f"""<div class="box" style="max-width:520px;margin:40px auto"><h2 style="margin-top:0">{html.escape(title, False)}</h2>
-<p class="muted">{html.escape(text, False)}</p><p class="muted" style="font-size:14px">Error {status}</p>
-<div class="row"><button type="button" onclick="history.length>1?history.back():location.assign('/')">← Back</button>
-<a class="btn primary" href="{'/' if user else '/login'}">{'Decks' if user else 'Log in'}</a></div></div>"""
+    e = lambda s: html.escape(s, False)
+    body = f"""<div class="box" style="max-width:520px;margin:40px auto"><h2 style="margin-top:0">{e(title)}</h2>
+<p class="muted">{e(text)}</p><p class="muted" style="font-size:14px">{e(t("Error {status}", status=status))}</p>
+<div class="row"><button type="button" onclick="history.length>1?history.back():location.assign('/')">{e(t("← Back"))}</button>
+<a class="btn primary" href="{'/' if user else '/login'}">{e(t("Decks") if user else t("Log in"))}</a></div></div>"""
     r = core.page(title, body, user)
     r.status_code = status
     return r

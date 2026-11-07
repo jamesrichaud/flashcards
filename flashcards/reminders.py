@@ -21,11 +21,13 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
 import app as core
+from flashcards import i18n
+from flashcards.i18n import t, tn, N_
 
 router = APIRouter()
 log = logging.getLogger("flashcards.reminders")
 
-DAY_NAMES = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+DAY_NAMES = (N_("Mon"), N_("Tue"), N_("Wed"), N_("Thu"), N_("Fri"), N_("Sat"), N_("Sun"))
 DEFAULT = {"on": False, "time": "19:00", "days": [0, 1, 2, 3, 4, 5, 6], "tz": "UTC",
            "last_sent": "", "subscriptions": []}
 WINDOW = 3 * 3600          # how late a missed reminder may still be sent
@@ -147,13 +149,13 @@ def message(counts):
         return None
     parts = []
     if r:
-        parts.append(f"{r} review" + ("s" if r != 1 else ""))
+        parts.append(tn("{n} review", "{n} reviews", r))
     if l:
-        parts.append(f"{l} learning")
+        parts.append(t("{n} learning", n=l))
     if n:
-        parts.append(f"{n} new")
-    title = f"You have {total} card{'s' if total != 1 else ''} due"
-    return {"title": title, "body": ", ".join(parts) + ". Tap to study.", "url": "/"}
+        parts.append(t("{n} new", n=n))
+    title = tn("You have {n} card due", "You have {n} cards due", total)
+    return {"title": title, "body": t("{counts}. Tap to study.", counts=", ".join(parts)), "url": "/"}
 
 
 # ---------- sending ----------
@@ -203,12 +205,12 @@ def is_due_now(conf, now=None):
     """True when today's reminder should go out now (not counting whether cards are due)."""
     if not conf["on"] or not conf["subscriptions"] or not conf["days"]:
         return False
-    t = local_now(conf, now)
-    if t.weekday() not in conf["days"] or conf["last_sent"] == t.date().isoformat():
+    here = local_now(conf, now)
+    if here.weekday() not in conf["days"] or conf["last_sent"] == here.date().isoformat():
         return False
     h, m = map(int, conf["time"].split(":"))
-    target = t.replace(hour=h, minute=m, second=0, microsecond=0)
-    return 0 <= (t - target).total_seconds() < WINDOW
+    target = here.replace(hour=h, minute=m, second=0, microsecond=0)
+    return 0 <= (here - target).total_seconds() < WINDOW
 
 
 def check_user(user, now=None):
@@ -217,7 +219,8 @@ def check_user(user, now=None):
     if not is_due_now(conf, now):
         return None
     day = local_now(conf, now).date().isoformat()
-    with core.collection(user) as col:
+    # No request here (the scheduler thread): use the person's own language.
+    with i18n.use_lang(core.user_lang(user) or "en"), core.collection(user) as col:
         payload = message(due_counts(col))
     update(user, lambda c: c.__setitem__("last_sent", day))   # once a day, even with nothing due
     if payload:
@@ -263,7 +266,7 @@ def device_label(sub):
             dev = name
             break
     else:
-        dev = "Device"
+        dev = t("Device")
     for needle, name in (("Edg/", "Edge"), ("Firefox/", "Firefox"), ("CriOS", "Chrome"), ("Chrome/", "Chrome"),
                          ("Safari/", "Safari")):
         if needle in ua:
@@ -275,6 +278,8 @@ SCRIPT = """<script>(function(){
 const st=document.getElementById('rmstate'),onb=document.getElementById('rmon'),offb=document.getElementById('rmoff'),
  testb=document.getElementById('rmtest'),tz=document.getElementById('rmtz'),key=%(key)s;
 try{tz.value=Intl.DateTimeFormat().resolvedOptions().timeZone||tz.value;}catch(e){}
+const L=%(texts)s;
+function fill(s,v){return s.replace(/[{]([A-Za-z_]+)[}]/g,(m,k)=>k in v?String(v[k]):m);}
 function say(t,err){st.textContent=t;st.className=err?'flash err':'flash';st.hidden=false;}
 const ios=/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
 const standalone=navigator.standalone===true||matchMedia('(display-mode: standalone)').matches;
@@ -284,30 +289,28 @@ function b64(s){s=s.replace(/-/g,'+').replace(/_/g,'/');s+='='.repeat((4-s.lengt
 async function current(){if(!supported)return null;const reg=await navigator.serviceWorker.register('/sw.js');
  await navigator.serviceWorker.ready;return {reg,sub:await reg.pushManager.getSubscription()};}
 async function post(url,data){const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
- if(!r.ok)throw new Error((await r.json().catch(()=>({}))).error||('Server said '+r.status));return r.json();}
+ if(!r.ok)throw new Error((await r.json().catch(()=>({}))).error||fill(L.serverSaid,{status:r.status}));return r.json();}
 async function show(){if(!supported){onb.disabled=true;offb.hidden=true;testb.disabled=true;
-  say(!window.isSecureContext?"Notifications need the HTTPS link to this app (not plain http://).":
-      ios&&!standalone?"On iPad: tap Share, then Add to Home Screen, open Flashcards from the Home Screen and turn reminders on there.":
-      "This browser can't show notifications from web apps.",true);return;}
+  say(!window.isSecureContext?L.needHttps:ios&&!standalone?L.ipad:L.unsupported,true);return;}
  try{const c=await current();const on=!!(c.sub&&Notification.permission==='granted');
-  document.getElementById('rmdev').textContent=on?'on':'off';onb.hidden=on;offb.hidden=!on;
-  if(Notification.permission==='denied')say("Notifications are blocked for this site. Allow them in the browser's site settings, then reload.",true);
- }catch(e){say('Could not check this device: '+e.message,true);}}
+  document.getElementById('rmdev').textContent=on?L.on:L.off;onb.hidden=on;offb.hidden=!on;
+  if(Notification.permission==='denied')say(L.blocked,true);
+ }catch(e){say(fill(L.cantCheck,{error:e.message}),true);}}
 onb.onclick=async()=>{onb.disabled=true;try{
-  const p=await Notification.requestPermission();if(p!=='granted'){say('Notifications were not allowed.',true);return;}
+  const p=await Notification.requestPermission();if(p!=='granted'){say(L.notAllowed,true);return;}
   const c=await current();let sub=c.sub;
   if(sub&&sub.options&&sub.options.applicationServerKey){const k=new Uint8Array(sub.options.applicationServerKey),want=b64(key);
    if(k.length!==want.length||k.some((v,i)=>v!==want[i])){await sub.unsubscribe();sub=null;}}
   if(!sub)sub=await c.reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:b64(key)});
   await post('/reminders/subscribe',{subscription:sub.toJSON(),tz:tz.value});location.reload();
- }catch(e){say('Could not turn on notifications: '+e.message,true);}finally{onb.disabled=false;}};
+ }catch(e){say(fill(L.cantTurnOn,{error:e.message}),true);}finally{onb.disabled=false;}};
 offb.onclick=async()=>{offb.disabled=true;try{const c=await current();
   if(c.sub){await post('/reminders/unsubscribe',{endpoint:c.sub.endpoint});await c.sub.unsubscribe();}location.reload();
- }catch(e){say('Could not turn off: '+e.message,true);}finally{offb.disabled=false;}};
+ }catch(e){say(fill(L.cantTurnOff,{error:e.message}),true);}finally{offb.disabled=false;}};
 testb.onclick=async()=>{testb.disabled=true;try{const c=await current();
   const r=await post('/reminders/test',{endpoint:c&&c.sub?c.sub.endpoint:null});
-  say(r.sent?'Test notification sent. It can take a few seconds to arrive.':(r.error||'Nothing was sent.'),!r.sent);
- }catch(e){say('Could not send: '+e.message,true);}finally{testb.disabled=false;}};
+  say(r.sent?L.testSent:(r.error||L.nothingSent),!r.sent);
+ }catch(e){say(fill(L.cantSend,{error:e.message}),true);}finally{testb.disabled=false;}};
 show();})();</script>"""
 
 
@@ -321,39 +324,61 @@ def reminders_page(request: Request):
     with core.collection(user) as col:
         counts = due_counts(col)
     total = sum(counts)
+    e = lambda s: html.escape(s, False)   # translated text in an HTML text node
     days = "".join(f'<label class="rmday"><input type="checkbox" name="days" value="{i}"'
-                   f'{" checked" if i in conf["days"] else ""}> {d}</label>' for i, d in enumerate(DAY_NAMES))
+                   f'{" checked" if i in conf["days"] else ""}> {e(t(d))}</label>' for i, d in enumerate(DAY_NAMES))
     devices = "".join(
-        f'<tr><td>{html.escape(device_label(s))}<br><span class="muted" style="font-size:14px">added '
-        f'{html.escape(s.get("added", ""))}</span></td><td style="text-align:right">'
+        f'<tr><td>{html.escape(device_label(s))}<br><span class="muted" style="font-size:14px">'
+        f'{e(t("added {date}", date=s.get("added", "")))}</span></td><td style="text-align:right">'
         f'<form method="post" action="/reminders/remove" style="margin:0"><input type="hidden" name="endpoint" '
-        f'value="{html.escape(s["endpoint"])}"><button class="danger">Remove</button></form></td></tr>'
-        for s in conf["subscriptions"]) or '<tr><td class="muted">No devices yet.</td></tr>'
-    body = f"""<p><a href="/settings">‹ Settings</a></p><h2>Study reminders</h2>
+        f'value="{html.escape(s["endpoint"])}"><button class="danger">{e(t("Remove"))}</button></form></td></tr>'
+        for s in conf["subscriptions"]) or f'<tr><td class="muted">{e(t("No devices yet."))}</td></tr>'
+    texts = {
+        "serverSaid": t("Server said {status}"),
+        "needHttps": t("Notifications need the HTTPS link to this app (not plain http://)."),
+        "ipad": t("On iPad: tap Share, then Add to Home Screen, open Flashcards from the Home Screen and turn "
+                  "reminders on there."),
+        "unsupported": t("This browser can't show notifications from web apps."),
+        "on": t("on"), "off": t("off"),
+        "blocked": t("Notifications are blocked for this site. Allow them in the browser's site settings, then reload."),
+        "cantCheck": t("Could not check this device: {error}"),
+        "notAllowed": t("Notifications were not allowed."),
+        "cantTurnOn": t("Could not turn on notifications: {error}"),
+        "cantTurnOff": t("Could not turn off: {error}"),
+        "testSent": t("Test notification sent. It can take a few seconds to arrive."),
+        "nothingSent": t("Nothing was sent."),
+        "cantSend": t("Could not send: {error}"),
+    }
+    # Sentences with a little markup: escape the translated sentence, then put the markup in.
+    state_line = e(t("Notifications on this device are {state}.")).replace("{state}", '<b id="rmdev">…</b>')
+    help_line = e(t("Reminders need the {https} link to this app.\nOn {ipad} (iPadOS 16.4 or later) add the app to "
+                    "the Home Screen first (Share › Add to Home Screen),\nopen it from there and turn notifications "
+                    "on inside it; Safari tabs can't get notifications.\nOn a {chromebook}, Chrome shows them while "
+                    "Chrome is running (an open tab isn't needed).")) \
+        .replace("{https}", "<b>HTTPS</b>").replace("{ipad}", "<b>iPad</b>").replace("{chromebook}", "<b>Chromebook</b>")
+    body = f"""<p><a href="/settings">{e(t("‹ Settings"))}</a></p><h2>{e(t("Study reminders"))}</h2>
 <div id="rmstate" class="flash" hidden></div>
-<div class="box"><h3 style="margin-top:0">This device</h3>
-<p>Notifications on this device are <b id="rmdev">…</b>.</p>
-<div class="row"><button id="rmon" class="primary">Turn on notifications here</button>
-<button id="rmoff" hidden>Turn off here</button><button id="rmtest">Send a test notification</button></div>
-<p class="muted" style="font-size:14px">Reminders need the <b>HTTPS</b> link to this app.
-On <b>iPad</b> (iPadOS 16.4 or later) add the app to the Home Screen first (Share › Add to Home Screen),
-open it from there and turn notifications on inside it; Safari tabs can't get notifications.
-On a <b>Chromebook</b>, Chrome shows them while Chrome is running (an open tab isn't needed).</p></div>
-<form class="box" method="post" action="/reminders/settings"><h3 style="margin-top:0">When</h3>
+<div class="box"><h3 style="margin-top:0">{e(t("This device"))}</h3>
+<p>{state_line}</p>
+<div class="row"><button id="rmon" class="primary">{e(t("Turn on notifications here"))}</button>
+<button id="rmoff" hidden>{e(t("Turn off here"))}</button><button id="rmtest">{e(t("Send a test notification"))}</button></div>
+<p class="muted" style="font-size:14px">{help_line}</p></div>
+<form class="box" method="post" action="/reminders/settings"><h3 style="margin-top:0">{e(t("When"))}</h3>
 <label class="rmday" style="font-size:17px;color:var(--ink)"><input type="checkbox" name="on" value="1"{" checked" if conf["on"] else ""}>
- Remind me every day I have cards due</label>
-<label for="rmtime">Time</label><input id="rmtime" type="time" name="time" value="{conf["time"]}" required style="max-width:180px">
-<label>Days</label><div class="row">{days}</div>
+ {e(t("Remind me every day I have cards due"))}</label>
+<label for="rmtime">{e(t("Time"))}</label><input id="rmtime" type="time" name="time" value="{conf["time"]}" required style="max-width:180px">
+<label>{e(t("Days"))}</label><div class="row">{days}</div>
 <input type="hidden" id="rmtz" name="tz" value="{html.escape(conf["tz"])}">
-<p class="muted" style="font-size:14px">Only sent when cards are due, at most once a day
-(“You have 34 cards due”). Time zone: {html.escape(conf["tz"])} (set from this device when you save).
-Right now: {total} card{"s" if total != 1 else ""} due.</p>
-<button class="primary">Save</button></form>
-<div class="box"><h3 style="margin-top:0">Devices that get reminders</h3><table>{devices}</table></div>
+<p class="muted" style="font-size:14px">{e(t(
+        "Only sent when cards are due, at most once a day\n(“{example}”). Time zone: {tz} (set from this device when "
+        "you save).", example=tn("You have {n} card due", "You have {n} cards due", 34), tz=conf["tz"]))}
+{e(tn("Right now: {n} card due.", "Right now: {n} cards due.", total))}</p>
+<button class="primary">{e(t("Save"))}</button></form>
+<div class="box"><h3 style="margin-top:0">{e(t("Devices that get reminders"))}</h3><table>{devices}</table></div>
 <style>.rmday{{display:inline-flex;align-items:center;gap:6px;min-height:44px;margin:0 10px 0 0;color:var(--ink);font-size:16px}}
 .rmday input{{width:auto}}</style>
-{SCRIPT % {"key": json.dumps(pub)}}"""
-    return core.page("Study reminders", body, user, "settings", core.take_flash(request))
+{SCRIPT % {"key": json.dumps(pub), "texts": core.js(texts)}}"""
+    return core.page(t("Study reminders"), body, user, "settings", core.take_flash(request))
 
 
 @router.post("/reminders/settings")
@@ -362,30 +387,30 @@ async def reminders_settings(request: Request):
     if not user:
         return core.need_login(request)
     form = await request.form()
-    t = str(form.get("time", "")).strip()[:5]
+    hhmm = str(form.get("time", "")).strip()[:5]
     tz = str(form.get("tz", "")).strip()
     try:
         days = sorted({int(d) for d in form.getlist("days")})
     except ValueError:
         days = None
-    if not TIME_RE.fullmatch(t) or days is None or any(not 0 <= d <= 6 for d in days):
-        core.set_flash(request, "!Please choose a time and days.")
+    if not TIME_RE.fullmatch(hhmm) or days is None or any(not 0 <= d <= 6 for d in days):
+        core.set_flash(request, "!" + t("Please choose a time and days."))
         return RedirectResponse("/reminders", 303)
     on = form.get("on") == "1"
 
     def change(c):
-        if (c["time"], c["tz"]) != (t, tz if valid_tz(tz) else c["tz"]) or (on and not c["on"]):
+        if (c["time"], c["tz"]) != (hhmm, tz if valid_tz(tz) else c["tz"]) or (on and not c["on"]):
             c["last_sent"] = ""   # a new time today should still fire today
-        c.update(on=on, time=t, days=days)
+        c.update(on=on, time=hhmm, days=days)
         if valid_tz(tz):
             c["tz"] = tz
     conf = update(user, change)
     if on and not days:
-        msg = "!Saved, but no days are ticked, so no reminders will be sent."
+        msg = "!" + t("Saved, but no days are ticked, so no reminders will be sent.")
     elif on and not conf["subscriptions"]:
-        msg = "Saved. Now turn on notifications on a device so the reminder has somewhere to go."
+        msg = t("Saved. Now turn on notifications on a device so the reminder has somewhere to go.")
     else:
-        msg = "Saved." if on else "Saved. Reminders are off."
+        msg = t("Saved.") if on else t("Saved. Reminders are off.")
     core.set_flash(request, msg)
     return RedirectResponse("/reminders", 303)
 
@@ -406,7 +431,7 @@ async def subscribe(request: Request):
     data = await _json(request)
     sub = data and data.get("subscription")
     if not valid_subscription(sub):
-        return JSONResponse({"ok": False, "error": "That isn't a push subscription."}, status_code=400)
+        return JSONResponse({"ok": False, "error": t("That isn't a push subscription.")}, status_code=400)
     host = request.headers.get("host", "localhost")
     entry = {"endpoint": sub["endpoint"], "keys": {"p256dh": sub["keys"]["p256dh"], "auth": sub["keys"]["auth"]},
              "origin": f"https://{host}" if re.fullmatch(r"[A-Za-z0-9.\-:\[\]]+", host) else "https://localhost",
@@ -442,7 +467,7 @@ async def remove(request: Request):
         return core.need_login(request)
     ep = str((await request.form()).get("endpoint", ""))
     update(user, lambda c: c.__setitem__("subscriptions", [s for s in c["subscriptions"] if s["endpoint"] != ep]))
-    core.set_flash(request, "Device removed.")
+    core.set_flash(request, t("Device removed."))
     return RedirectResponse("/reminders", 303)
 
 
@@ -455,11 +480,11 @@ async def test(request: Request):
     ep = data.get("endpoint") if isinstance(data.get("endpoint"), str) else None
     subs = load(user)["subscriptions"]
     if not subs or (ep and all(s["endpoint"] != ep for s in subs)):
-        return {"ok": True, "sent": 0, "error": "Turn on notifications on this device first."}
+        return {"ok": True, "sent": 0, "error": t("Turn on notifications on this device first.")}
     with core.collection(user) as col:
-        payload = message(due_counts(col)) or {"title": "No cards due", "body": "You're all caught up.", "url": "/"}
-    payload["title"] = "Test: " + payload["title"]
+        payload = message(due_counts(col)) or {"title": t("No cards due"), "body": t("You're all caught up."), "url": "/"}
+    payload["title"] = t("Test: {title}", title=payload["title"])
     payload["tag"] = "fc-test"
     sent, failed = send_all(user, payload, ep)
     return {"ok": True, "sent": sent, "failed": failed,
-            "error": "" if sent else "The push service refused it. Turn notifications off and on again here."}
+            "error": "" if sent else t("The push service refused it. Turn notifications off and on again here.")}

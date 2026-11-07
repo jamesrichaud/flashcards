@@ -32,12 +32,14 @@ from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 import app as core
+from flashcards.i18n import t, N_
 
 router = APIRouter()
 
 ID_PAT = re.compile(r"[A-Za-z0-9_-]{1,64}")
 ANKI_DESKTOP_PAT = re.compile(r"^\s*(from|import)\s+aqt\b", re.M)
 HOOKS = ("card_render", "after_answer")
+HOOK_LABELS = {"card_render": N_("card render"), "after_answer": N_("after answer")}   # shown on the Add-ons page
 
 
 def addons_dir():
@@ -98,7 +100,7 @@ def describe(aid):
     try:
         src = open(path, encoding="utf-8").read()
     except (OSError, UnicodeDecodeError) as e:
-        info["broken"] = f"Can't read the file: {e}"
+        info["broken"] = t("Can't read the file: {error}", error=e)
         return info
     # Desktop Anki add-ons use Anki's Qt GUI (aqt) and usually ship a manifest.json/config.json.
     if ANKI_DESKTOP_PAT.search(src) or (folder and os.path.isfile(os.path.join(folder, "manifest.json"))):
@@ -106,16 +108,16 @@ def describe(aid):
     try:
         tree = ast.parse(src)
     except SyntaxError as e:
-        info["broken"] = f"Syntax error on line {e.lineno}: {e.msg}"
+        info["broken"] = t("Syntax error on line {line}: {error}", line=e.lineno, error=e.msg)
         return info
     doc = ast.get_docstring(tree)
     if doc:
         info["description"] = doc.strip().splitlines()[0]
     for node in tree.body:
         if isinstance(node, ast.Assign) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
-            for t in node.targets:
-                if isinstance(t, ast.Name) and t.id in ("NAME", "DESCRIPTION"):
-                    info["name" if t.id == "NAME" else "description"] = node.value.value.strip()
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id in ("NAME", "DESCRIPTION"):
+                    info["name" if target.id == "NAME" else "description"] = node.value.value.strip()
     return info
 
 
@@ -170,7 +172,7 @@ def load(aid):
         entry = {"mtime": mt, "module": None, "app": None}
         _loaded[aid] = entry
         if describe(aid)["desktop"]:
-            _errors[aid] = "This is a desktop Anki add-on; it can't run here."
+            _errors[aid] = t("This is a desktop Anki add-on; it can't run here.")
             return None
         name = module_name(aid)
         try:
@@ -221,7 +223,7 @@ def card_render(col, card, kind, text):
         if isinstance(out, str):
             text = out
         elif out is not None:
-            _errors[aid] = "card_render: must return the card's HTML as text"
+            _errors[aid] = t("card_render: must return the card's HTML as text")
     return text
 
 
@@ -290,24 +292,31 @@ class Dispatcher:
             log_error(aid, f"page {path}")
             if started:     # the add-on's app already sent its own 500
                 return
-            await HTMLResponse(core.page("Add-on error",
-                f'<div class="box"><p>The add-on “{html.escape(aid)}” failed. '
-                f'See the <a href="/addons">Add-ons page</a> for the error.</p></div>',
-                session.get("user")).body, 500)(scope, receive, send)
+            text = html.escape(t("The add-on “{name}” failed. See the {link} for the error."), False)
+            link = f'<a href="/addons">{html.escape(t("Add-ons page"), False)}</a>'
+            text = text.replace("{name}", html.escape(aid)).replace("{link}", link)
+            await HTMLResponse(core.page(t("Add-on error"), f'<div class="box"><p>{text}</p></div>',
+                                         session.get("user")).body, 500)(scope, receive, send)
 
 
 # ---------- the Add-ons page ----------
-NOTE = """<p class="muted">Add-ons here are small Python files on the server, written for this web app.
-Put a file such as <code>my_addon.py</code> in the <code>addons</code> folder inside the app's data folder,
-then turn it on below. Add-ons run with the server's full rights and apply to everyone using this server,
-so only add files you trust. <b>Desktop Anki add-ons (from ankiweb.net) don't run here</b>: they are made for
-Anki's desktop window, which this app doesn't have.</p>"""
+def note_html():
+    e = lambda s: html.escape(s, False)
+    text = e(t("Add-ons here are small Python files on the server, written for this web app.\nPut a file such as "
+               "{file} in the {folder} folder inside the app's data folder,\nthen turn it on below. Add-ons run with "
+               "the server's full rights and apply to everyone using this server,\nso only add files you trust. "
+               "{desktop}: they are made for\nAnki's desktop window, which this app doesn't have."))
+    desktop = "<b>" + e(t("Desktop Anki add-ons (from ankiweb.net) don't run here")) + "</b>"
+    text = (text.replace("{file}", "<code>my_addon.py</code>").replace("{folder}", "<code>addons</code>")
+            .replace("{desktop}", desktop))
+    return f'<p class="muted">{text}</p>'
 
 
 def addons_body():
     ids = addon_ids()
     on = set(enabled_ids())
     rows = []
+    e = lambda s: html.escape(s, False)   # translated text in an HTML text node
     for aid in ids:
         info = describe(aid)
         enabled = aid in on
@@ -315,17 +324,17 @@ def addons_body():
         err = _errors.get(aid) if enabled else ""
         status = []
         if info["desktop"]:
-            status.append('<span class="danger">Desktop Anki add-on: can\'t run here.</span>')
+            status.append('<span class="danger">' + e(t("Desktop Anki add-on: can't run here.")) + '</span>')
         elif info["broken"]:
             status.append(f'<span class="danger">{html.escape(info["broken"])}</span>')
         elif err:
-            status.append(f'<span class="danger">Error: {html.escape(err)}</span>')
+            status.append(f'<span class="danger">{html.escape(t("Error: {error}", error=err))}</span>')
         if mod is not None:
-            hooks = [h.replace("_", " ") for h in HOOKS if callable(getattr(mod, h, None))]
+            hooks = [t(HOOK_LABELS[h]) for h in HOOKS if callable(getattr(mod, h, None))]
             if (_loaded.get(aid) or {}).get("app"):
-                hooks.append("pages")
+                hooks.append(t("pages"))
             if hooks:
-                status.append('<span class="muted">Uses: ' + ", ".join(hooks) + "</span>")
+                status.append(f'<span class="muted">{e(t("Uses: {hooks}", hooks=", ".join(hooks)))}</span>')
             links = []
             for item in getattr(mod, "MENU", None) or []:
                 try:
@@ -333,29 +342,29 @@ def addons_body():
                     sub = "/" + str(sub).lstrip("/")
                 except (TypeError, ValueError):
                     continue
-                links.append(f'<a class="btn" href="/addon/{aid}{html.escape(sub)}">{html.escape(str(label))}</a>')
+                links.append(f'<a class="btn" href="/addon/{aid}{html.escape(sub)}">{html.escape(t(str(label)))}</a>')
             if links:
                 status.append('<span class="row">' + "".join(links) + "</span>")
         can_enable = enabled or not (info["desktop"] or info["broken"])
         btn = (f'<form method="post" action="/addons/{aid}/{"disable" if enabled else "enable"}" style="margin:0">'
-               f'<button{" class=primary" if not enabled else ""}>{"Turn off" if enabled else "Turn on"}</button></form>'
+               f'<button{" class=primary" if not enabled else ""}>{e(t("Turn off") if enabled else t("Turn on"))}</button></form>'
                if can_enable else "")
-        desc = f'<br><span class="muted">{html.escape(info["description"])}</span>' if info["description"] else ""
-        state = '<b class="rev">On</b>' if enabled else '<span class="muted">Off</span>'
+        desc = f'<br><span class="muted">{html.escape(t(info["description"]))}</span>' if info["description"] else ""
+        state = f'<b class="rev">{e(t("On"))}</b>' if enabled else f'<span class="muted">{e(t("Off"))}</span>'
         rows.append(f"""<div class="box addon" id="addon-{aid}"><div class="row" style="justify-content:space-between">
-<div style="flex:1;min-width:200px"><h3 style="margin:0">{html.escape(info["name"])} · {state}</h3>
+<div style="flex:1;min-width:200px"><h3 style="margin:0">{html.escape(t(info["name"]))} · {state}</h3>
 <span class="muted">{html.escape(aid)}</span>{desc}</div>{btn}</div>
 {"".join(f'<p style="margin:10px 0 0">{s}</p>' for s in status)}</div>""")
     if not rows:
-        rows.append('<div class="box"><p style="margin:0">No add-ons installed.</p></div>')
-    return f'<div class="box">{NOTE}</div>{"".join(rows)}'
+        rows.append(f'<div class="box"><p style="margin:0">{e(t("No add-ons installed."))}</p></div>')
+    return f'<div class="box">{note_html()}</div>{"".join(rows)}'
 
 
 @router.get("/addons", response_class=HTMLResponse)
 def addons_page(request: Request):
     u = core.current_user(request)
     if not u: return core.need_login(request)
-    return core.page("Add-ons", addons_body(), u, "settings", core.take_flash(request))
+    return core.page(t("Add-ons"), addons_body(), u, "settings", core.take_flash(request))
 
 
 @router.post("/addons/{aid}/{action}")
@@ -363,19 +372,19 @@ def addons_toggle(request: Request, aid: str, action: str):
     u = core.current_user(request)
     if not u: return core.need_login(request)
     if action not in ("enable", "disable") or not ID_PAT.fullmatch(aid) or aid not in addon_ids():
-        core.set_flash(request, "!No such add-on.")
+        core.set_flash(request, "!" + t("No such add-on."))
         return RedirectResponse("/addons", 303)
     info = describe(aid)
     if action == "enable":
         if info["desktop"] or info["broken"]:
-            core.set_flash(request, f"!“{info['name']}” can't be turned on.")
+            core.set_flash(request, "!" + t("“{name}” can't be turned on.", name=info["name"]))
             return RedirectResponse("/addons", 303)
         set_enabled(aid, True)
         load(aid)
         err = _errors.get(aid)
-        core.set_flash(request, f"!“{info['name']}” is on, but failed to load: {err}" if err
-                       else f"“{info['name']}” is on.")
+        core.set_flash(request, "!" + t("“{name}” is on, but failed to load: {error}", name=info["name"], error=err)
+                       if err else t("“{name}” is on.", name=info["name"]))
     else:
         set_enabled(aid, False)
-        core.set_flash(request, f"“{info['name']}” is off.")
+        core.set_flash(request, t("“{name}” is off.", name=info["name"]))
     return RedirectResponse("/addons", 303)

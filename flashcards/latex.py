@@ -24,12 +24,14 @@ import anki.latex as engine_latex
 from anki import hooks
 from anki.config import Config
 
+from flashcards.i18n import t, N_
+
 TIMEOUT = 20   # seconds per command (latex, dvipng)
 LOG_MAX = 4000
 # Older Anki refused these in a card's LaTeX for security; the message is the engine's own.
 BANNED = ("\\write18", "\\readline", "\\input", "\\include", "\\catcode", "\\openout",
           "\\write", "\\loop", "\\def", "\\shipout")
-NOT_INSTALLED = "LaTeX isn't installed on the server"
+NOT_INSTALLED = N_("LaTeX isn't installed on the server")   # translate with t(NOT_INSTALLED)
 IMG_PAT = re.compile(r'<img class=latex alt="([^"]*)" src="([^"]+)">')
 
 
@@ -55,8 +57,9 @@ def set_enabled(col, on):
 
 
 def not_installed_msg(svg=False):
-    progs = " and ".join(cmd[0] for cmd in commands(svg))
-    return f"{NOT_INSTALLED} ({progs}), so it is shown as source."
+    names = [cmd[0] for cmd in commands(svg)]
+    progs = t("{first} and {last}", first=", ".join(names[:-1]), last=names[-1]) if len(names) > 1 else names[0]
+    return t("LaTeX isn't installed on the server ({programs}), so it is shown as source.", programs=progs)
 
 
 def save_latex_image(col, extracted, header, footer, svg):
@@ -84,7 +87,7 @@ def save_latex_image(col, extracted, header, footer, svg):
                 log.append(p.stdout.decode("utf8", "replace"))
                 failed = p.returncode != 0
             except subprocess.TimeoutExpired:
-                log.append(f"Stopped after {TIMEOUT} seconds.")
+                log.append(t("Stopped after {n} seconds.", n=TIMEOUT))
                 failed = True
             except OSError as e:
                 log.append(str(e))
@@ -92,7 +95,7 @@ def save_latex_image(col, extracted, header, footer, svg):
             if failed:
                 text = "".join(log)[-LOG_MAX:]
                 return (f"{html.escape(clean(col.tr.media_error_executing(val=argv[0])))}"
-                        f"<details><summary>Log</summary><pre style=\"white-space:pre-wrap;text-align:left;"
+                        f"<details><summary>{html.escape(t('Log'), quote=False)}</summary><pre style=\"white-space:pre-wrap;text-align:left;"
                         f"font-size:12px\">{html.escape(text)}</pre></details>")
         out = os.path.join(tmp, f"tmp.{ext}")
         if not os.path.exists(out):
@@ -124,7 +127,7 @@ def render(text, model, col):
     out = IMG_PAT.sub(source, out)
     if not enabled(col):
         note = (html.escape(clean(col.tr.preferences_latex_generation_disabled())) +
-                ' Turn on “Generate LaTeX images” in Preferences.')
+                ' ' + html.escape(t("Turn on “Generate LaTeX images” in Preferences."), quote=False))
     else:
         note = "<br>".join(dict.fromkeys(errors))   # same message once
     return out + f'<div class="latex-error" style="{NOTE_STYLE}">{note}</div>'

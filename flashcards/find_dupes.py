@@ -16,6 +16,7 @@ import anki.lang
 from anki.collection import SearchNode
 
 import app as core
+from flashcards.i18n import t, tn
 
 router = APIRouter()
 LAST_KEY = "flashcardsFindDupes"   # our own key: {"field": .., "q": ..} last used, per collection
@@ -55,19 +56,27 @@ def results_html(col, field, q, groups):
     esc = html.escape
     tr = col.tr
     if not groups:
-        return f'<div class="box"><p style="margin:0">No duplicates found in <b>{esc(field)}</b>.</p></div>'
+        return (f'<div class="box"><p style="margin:0">'
+                f'{core.ht(t("No duplicates found in {field}."), field=f"<b>{esc(field)}</b>")}</p></div>')
     total = sum(len(n) for _, n in groups)
     back = quote(dupes_url(field, q), safe="/")
     all_url = core.browse_url(nid_search(col, [n for _, ns in groups for n in ns]), mode="notes")
-    head = (f'<div class="box row" style="justify-content:space-between"><span><b>{len(groups)}</b> '
-            f'group{"" if len(groups) == 1 else "s"} · {total} notes</span><div class="row">'
-            f'<a class="btn" href="{esc(all_url)}">Browse all</a>'
+    # tn() picks the plural form; the placeholders are filled by ht() so the number can be bold
+    count = core.ht(tn("{count} group · {notes} notes", "{count} groups · {notes} notes", len(groups),
+                       count="{count}", notes="{notes}"),
+                    count=f"<b>{len(groups)}</b>", notes=total)
+    dup_tag = esc(tr.browsing_duplicate())
+    explain = core.ht(tn("{action} adds the tag {tag} to all {n} notes, so you can find them later with {search}.",
+                         "{action} adds the tag {tag} to all {n} notes, so you can find them later with {search}.",
+                         total, action="{action}", tag="{tag}", search="{search}"),
+                      action=esc(tr.browsing_tag_duplicates()), tag=f"<code>{dup_tag}</code>",
+                      search=f"<code>tag:{dup_tag}</code>")
+    head = (f'<div class="box row" style="justify-content:space-between"><span>{count}</span><div class="row">'
+            f'<a class="btn" href="{esc(all_url)}">{esc(t("Browse all"))}</a>'
             f'<form method="post" action="/browse/dupes/tag" class="row" style="margin:0">'
             f'<input type="hidden" name="field" value="{esc(field)}"><input type="hidden" name="q" value="{esc(q)}">'
             f'<button class="primary">{esc(tr.browsing_tag_duplicates())}</button></form></div>'
-            f'<p class="muted" style="flex-basis:100%;margin:0;font-size:14px">{esc(tr.browsing_tag_duplicates())} adds the tag '
-            f'<code>{esc(tr.browsing_duplicate())}</code> to all {total} notes, so you can find them later with '
-            f'<code>tag:{esc(tr.browsing_duplicate())}</code>.</p></div>')
+            f'<p class="muted" style="flex-basis:100%;margin:0;font-size:14px">{explain}</p></div>')
     deck_name = {d.id: d.name for d in col.decks.all_names_and_ids()}
     rows = []
     for val, nids in groups[:MAX_GROUPS]:
@@ -84,10 +93,11 @@ def results_html(col, field, q, groups):
         url = core.browse_url(nid_search(col, nids), mode="notes")
         shown = val if len(val) <= 200 else val[:200] + "…"
         rows.append(f'<div class="box dgroup"><div class="row" style="justify-content:space-between">'
-                    f'<b class="dval">{esc(shown)}</b><a class="btn" href="{esc(url)}">{len(nids)} notes in Browse</a></div>'
+                    f'<b class="dval">{esc(shown)}</b><a class="btn" href="{esc(url)}">'
+                    f'{esc(tn("{n} notes in Browse", "{n} notes in Browse", len(nids)))}</a></div>'
                     f'<div class="dnotes">{"".join(notes)}</div></div>')
-    more = (f'<p class="muted">Showing the first {MAX_GROUPS} groups of {len(groups)}. '
-            f'Use “Browse all” or narrow the search to see the rest.</p>') if len(groups) > MAX_GROUPS else ""
+    more = (f'<p class="muted">{esc(t("Showing the first {shown} groups of {n}.", shown=MAX_GROUPS, n=len(groups)))} '
+            f'{esc(t("Use “Browse all” or narrow the search to see the rest."))}</p>') if len(groups) > MAX_GROUPS else ""
     return head + "".join(rows) + more
 
 
@@ -110,7 +120,7 @@ def dupes_page(request: Request, field: str = "", q: str = "", search: str = "")
         out = ""
         if field:
             if field.lower() not in {n.lower() for n in names}:
-                out = f'<div class="flash err">No note type has a field called “{esc(field)}”.</div>'
+                out = f'<div class="flash err">{esc(t("No note type has a field called “{field}”.", field=field))}</div>'
             else:
                 try:
                     groups = find(col, field, q)
@@ -118,7 +128,7 @@ def dupes_page(request: Request, field: str = "", q: str = "", search: str = "")
                     if last != {"field": field, "q": q}:
                         col.set_config(LAST_KEY, {"field": field, "q": q})
                 except Exception as e:  # noqa: BLE001
-                    out = f'<div class="flash err">{esc(clean(e) or "That search did not work.")}</div>'
+                    out = f'<div class="flash err">{esc(clean(e) or t("That search did not work."))}</div>'
             box_q = q
         else:
             box_q = search if search else str(last.get("q", ""))
@@ -129,12 +139,12 @@ def dupes_page(request: Request, field: str = "", q: str = "", search: str = "")
                    for n in names)
     body = f"""<style>{CSS}</style><div class="box"><h2 style="margin-top:0">{esc(title)}</h2>
 <form class="dform" method="get" action="/browse/dupes"><div class="row">
-<label class="row" style="margin:0;gap:8px">{esc(search_in.rstrip(':'))}: <select name="field" aria-label="Field">{opts}</select></label>
-<input name="q" value="{esc(box_q)}" style="flex:1;min-width:200px" placeholder="{esc(optional.rstrip(':'))} (e.g. deck:French)"
-aria-label="Optional filter"><button class="primary">Search</button></div></form>
-<p class="muted" style="margin-bottom:0;font-size:14px">Notes count as duplicates when the field is the same once
-formatting and pictures are ignored. Blank fields don't count.</p>
-<p style="margin-bottom:0"><a href="{esc(core.browse_url(box_q))}">← Back to Browse</a></p></div>{out}"""
+<label class="row" style="margin:0;gap:8px">{esc(search_in.rstrip(':'))}: <select name="field" aria-label="{esc(t("Field"))}">{opts}</select></label>
+<input name="q" value="{esc(box_q)}" style="flex:1;min-width:200px" placeholder="{esc(t("{filter} (e.g. deck:French)", filter=optional.rstrip(':')))}"
+aria-label="{esc(t("Optional filter"))}"><button class="primary">{esc(t("Search"))}</button></div></form>
+<p class="muted" style="margin-bottom:0;font-size:14px">{html.escape(t("Notes count as duplicates when the field is the same once formatting and pictures are ignored."), quote=False)}
+{html.escape(t("Blank fields don't count."), quote=False)}</p>
+<p style="margin-bottom:0"><a href="{esc(core.browse_url(box_q))}">{html.escape(t("← Back to Browse"), quote=False)}</a></p></div>{out}"""
     return core.page(title, body, user, "browse", core.take_flash(request))
 
 
@@ -146,14 +156,14 @@ async def tag_dupes(request: Request):
     field, q = str(form.get("field", "")), str(form.get("q", ""))
     with core.collection(user) as col:
         try:
-            if not field: raise ValueError("Choose a field first.")
+            if not field: raise ValueError(t("Choose a field first."))
             nids = [n for _, ns in find(col, field, q) for n in ns]
             if nids:
                 changed = col.tags.bulk_add(nids, col.tr.browsing_duplicate()).count
                 msg = clean(col.tr.browsing_notes_updated(count=changed))
             else:
-                msg = "No duplicates to tag."
+                msg = t("No duplicates to tag.")
         except Exception as e:  # noqa: BLE001
-            msg = "!" + (clean(e) or "That did not work.")
+            msg = "!" + (clean(e) or t("That did not work."))
     core.set_flash(request, msg)
     return RedirectResponse(dupes_url(field, q), 303)

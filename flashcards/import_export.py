@@ -18,6 +18,7 @@ from anki.collection import (Collection, ImportAnkiPackageRequest, ImportAnkiPac
                              ExportAnkiPackageOptions, CsvMetadata, DeckIdLimit, NoteIdsLimit, CardIdsLimit)
 import app as core
 from flashcards import maintenance
+from flashcards.i18n import t, tn, N_
 
 router = APIRouter()
 Update = pb.ImportAnkiPackageUpdateCondition
@@ -30,8 +31,8 @@ DELIMS = [(CsvMetadata.Delimiter.TAB, "importing_tab"), (CsvMetadata.Delimiter.P
 DUPES = [(CsvMetadata.DupeResolution.UPDATE, "importing_update"),
          (CsvMetadata.DupeResolution.PRESERVE, "importing_preserve"),
          (CsvMetadata.DupeResolution.DUPLICATE, "importing_duplicate")]
-SCOPES = [(CsvMetadata.MatchScope.NOTETYPE, "Note type"),
-          (CsvMetadata.MatchScope.NOTETYPE_AND_DECK, "Note type and deck")]
+SCOPES = [(CsvMetadata.MatchScope.NOTETYPE, N_("Note type")),
+          (CsvMetadata.MatchScope.NOTETYPE_AND_DECK, N_("Note type and deck"))]
 PACKAGE_EXTS = (".apkg", ".colpkg", ".zip")
 TEXT_EXTS = (".csv", ".tsv", ".txt")
 UPLOAD_DIR = os.path.join(tempfile.gettempdir(), "flashcards-uploads")
@@ -47,6 +48,11 @@ _last_log = {}
 CHK = 'style="width:22px;height:22px;flex:none"'
 
 
+def esc(s):
+    """Escape translated text for an HTML text node (quotes left alone, so English output is unchanged)."""
+    return html.escape(s, quote=False)
+
+
 def check(name, label, on, help_text=""):
     tip = f' title="{html.escape(help_text)}"' if help_text else ""
     return (f'<label class="row" style="margin:6px 0;color:var(--ink);font-size:17px;min-height:44px;flex-wrap:nowrap"{tip}>'
@@ -55,12 +61,8 @@ def check(name, label, on, help_text=""):
 
 
 def options(choices, current):
-    return "".join(f'<option value="{v}"{" selected" if v == current else ""}>{html.escape(t)}</option>'
-                   for v, t in choices)
-
-
-def plural(n, word):
-    return f"{n} {word}{'' if n == 1 else 's'}"
+    return "".join(f'<option value="{v}"{" selected" if v == current else ""}>{html.escape(text)}</option>'
+                   for v, text in choices)
 
 
 # ---------- uploads ----------
@@ -74,8 +76,8 @@ def _clean_uploads():
                 os.remove(p)
         except OSError:
             pass
-    for t in [t for t, u in _uploads.items() if not os.path.exists(u["path"])]:
-        _uploads.pop(t, None)
+    for tok in [tok for tok, u in _uploads.items() if not os.path.exists(u["path"])]:
+        _uploads.pop(tok, None)
 
 
 async def save_upload(user, file, ext):
@@ -109,15 +111,16 @@ def ext_of(name):
 
 # ---------- import log ----------
 # (log field, status shown). `first_field_match` depends on the chosen "Existing notes" setting.
-LOG_KINDS = [("new", "Added"), ("updated", "Updated"), ("duplicate", "Skipped (already in your collection)"),
-             ("conflicting", "Skipped (note type changed)"), ("first_field_match", None),
-             ("missing_notetype", "Skipped (note type missing)"), ("missing_deck", "Skipped (deck missing)"),
-             ("empty_first_field", "Skipped (empty first field)")]
+LOG_KINDS = [("new", N_("Added")), ("updated", N_("Updated")),
+             ("duplicate", N_("Skipped (already in your collection)")),
+             ("conflicting", N_("Skipped (note type changed)")), ("first_field_match", None),
+             ("missing_notetype", N_("Skipped (note type missing)")), ("missing_deck", N_("Skipped (deck missing)")),
+             ("empty_first_field", N_("Skipped (empty first field)"))]
 
 
-FFM_STATUS = {CsvMetadata.DupeResolution.UPDATE: ("updated", "Updated (first field matched)"),
-              CsvMetadata.DupeResolution.PRESERVE: ("skipped", "Skipped (first field matches a note)"),
-              CsvMetadata.DupeResolution.DUPLICATE: ("new", "Added (first field matches a note)")}
+FFM_STATUS = {CsvMetadata.DupeResolution.UPDATE: ("updated", N_("Updated (first field matched)")),
+              CsvMetadata.DupeResolution.PRESERVE: ("skipped", N_("Skipped (first field matches a note)")),
+              CsvMetadata.DupeResolution.DUPLICATE: ("new", N_("Added (first field matches a note)"))}
 
 
 def ffm(log):
@@ -130,18 +133,23 @@ def count_new(log):
     return len(log.new) + (len(log.first_field_match) if ffm(log)[0] == "new" else 0)
 
 
-def summarise(log):
-    """One line like Anki's import summary."""
+def summary_parts(log):
+    """The pieces of Anki's import summary: new notes, then updated / skipped if any."""
     kind, n_ffm = ffm(log)[0], len(log.first_field_match)
-    parts = [plural(count_new(log), "new note")]
+    parts = [tn("{n} new note", "{n} new notes", count_new(log))]
     updated = len(log.updated) + (n_ffm if kind == "updated" else 0)
     if updated:
-        parts.append(f"{updated} updated")
+        parts.append(tn("{n} updated", "{n} updated", updated))
     skipped = len(log.duplicate) + len(log.conflicting) + len(log.missing_notetype) + len(log.missing_deck) \
         + len(log.empty_first_field) + (n_ffm if kind == "skipped" else 0)
     if skipped:
-        parts.append(f"{skipped} skipped")
-    return ", ".join(parts)
+        parts.append(tn("{n} skipped", "{n} skipped", skipped))
+    return parts
+
+
+def summarise(log):
+    """One line like Anki's import summary."""
+    return ", ".join(summary_parts(log))
 
 
 def remember_log(user, name, log):
@@ -159,17 +167,20 @@ def log_html(user):
     lg = _last_log.get(user)
     if not lg:
         return ""
+    browse = html.escape(t("Browse"))
     rows = "".join(
-        f'<tr><td>{html.escape(label)}</td><td>{html.escape(f[0] if f else "")}</td>'
+        f'<tr><td>{html.escape(t(label))}</td><td>{html.escape(f[0] if f else "")}</td>'
         f'<td>{html.escape(f[1] if len(f) > 1 else "")}</td>'
-        f'<td>{f"<a href=/browse?q=nid:{nid}>Browse</a>" if nid else ""}</td></tr>'
+        f'<td>{f"<a href=/browse?q=nid:{nid}>{browse}</a>" if nid else ""}</td></tr>'
         for label, nid, f in lg["rows"][:LOG_ROWS])
-    more = (f'<p class="muted">Showing the first {LOG_ROWS} of {len(lg["rows"])} notes.</p>'
+    more = (f'<p class="muted">{html.escape(t("Showing the first {shown} of {n} notes.", shown=LOG_ROWS, n=len(lg["rows"])))}</p>'
             if len(lg["rows"]) > LOG_ROWS else "")
-    return f"""<div class="box" id="log"><h3 style="margin-top:0">Last import: {html.escape(lg['name'])}</h3>
-<p>{html.escape(lg['summary'])} <span class="muted">· {lg['found']} notes found in file · {lg['when']}</span></p>
-<details><summary class="btn">Details</summary><div style="overflow-x:auto;margin-top:10px"><table>
-<tr><th>Status</th><th>First field</th><th>Second field</th><th></th></tr>{rows}</table></div>{more}</details></div>"""
+    last = html.escape(t("Last import: {name}", name=lg["name"]))
+    found = html.escape(t("{n} notes found in file", n=lg["found"]))
+    return f"""<div class="box" id="log"><h3 style="margin-top:0">{last}</h3>
+<p>{html.escape(lg['summary'])} <span class="muted">· {found} · {lg['when']}</span></p>
+<details><summary class="btn">{html.escape(t("Details"))}</summary><div style="overflow-x:auto;margin-top:10px"><table>
+<tr><th>{html.escape(t("Status"))}</th><th>{html.escape(t("First field"))}</th><th>{html.escape(t("Second field"))}</th><th></th></tr>{rows}</table></div>{more}</details></div>"""
 
 
 # ---------- import page ----------
@@ -181,13 +192,15 @@ def import_page(request: Request):
         tr = col.tr
         p = col._backend.get_import_anki_package_presets()
     upd = lambda name, cur: (f'<select name="{name}" style="width:auto">'
-                             + options([(v, getattr(tr, t)()) for v, t in UPDATE_CHOICES], cur) + "</select>")
-    body = f"""<div class="box"><h2 style="margin-top:0">Import a deck</h2>
-<p>Choose an Anki deck file (<b>.apkg</b>), for example a shared deck from ankiweb.net/shared or one exported from Anki.
-A whole-collection backup (<b>.colpkg</b>) can be imported here too; you will be asked to confirm, because it replaces everything.</p>
+                             + options([(v, getattr(tr, key)()) for v, key in UPDATE_CHOICES], cur) + "</select>")
+    body = f"""<div class="box"><h2 style="margin-top:0">{esc(t("Import a deck"))}</h2>
+<p>{core.ht(t("Choose an Anki deck file ({apkg}), for example a shared deck from ankiweb.net/shared or one exported from Anki."),
+            apkg="<b>.apkg</b>")}
+{core.ht(t("A whole-collection backup ({colpkg}) can be imported here too; you will be asked to confirm, because it replaces everything."),
+         colpkg="<b>.colpkg</b>")}</p>
 <form method="post" action="/import" enctype="multipart/form-data"><input type="hidden" name="opts" value="1">
 <input type="file" name="file" accept=".apkg,.colpkg,.zip" required>
-<details style="margin-top:10px"><summary class="btn">Options</summary><div style="margin-top:8px">
+<details style="margin-top:10px"><summary class="btn">{esc(t("Options"))}</summary><div style="margin-top:8px">
 {check("with_scheduling", tr.importing_also_import_progress(), p.with_scheduling, tr.importing_include_reviews_help())}
 {check("with_deck_configs", tr.importing_with_deck_configs(), p.with_deck_configs, tr.importing_with_deck_configs_help())}
 <h4 style="margin:12px 0 0">{html.escape(tr.importing_updates())}</h4>
@@ -195,18 +208,18 @@ A whole-collection backup (<b>.colpkg</b>) can be imported here too; you will be
 <div class="row"><label style="margin:0;min-width:160px;color:var(--ink);font-size:17px" title="{html.escape(tr.importing_update_notes_help())}">{html.escape(tr.importing_update_notes())}</label>{upd("update_notes", p.update_notes)}</div>
 <div class="row" style="margin-top:8px"><label style="margin:0;min-width:160px;color:var(--ink);font-size:17px" title="{html.escape(tr.importing_update_notetypes_help())}">{html.escape(tr.importing_update_notetypes())}</label>{upd("update_notetypes", p.update_notetypes)}</div>
 </div></details>
-<p><button class="primary">Import</button></p></form>
-<p class="muted" style="font-size:14px">Large decks with lots of images can take a minute.</p></div>
-<div class="box"><h2 style="margin-top:0">Import a text file</h2>
-<p>Choose a <b>.csv</b>, <b>.tsv</b> or <b>.txt</b> file with one note per line. Next you can pick the separator,
-note type, deck and which column goes into which field.</p>
+<p><button class="primary">{esc(t("Import"))}</button></p></form>
+<p class="muted" style="font-size:14px">{esc(t("Large decks with lots of images can take a minute."))}</p></div>
+<div class="box"><h2 style="margin-top:0">{esc(t("Import a text file"))}</h2>
+<p>{core.ht(t("Choose a {csv}, {tsv} or {txt} file with one note per line."), csv="<b>.csv</b>", tsv="<b>.tsv</b>", txt="<b>.txt</b>")}
+{esc(t("Next you can pick the separator, note type, deck and which column goes into which field."))}</p>
 <form method="post" action="/import/csv" enctype="multipart/form-data">
 <input type="file" name="file" accept=".csv,.tsv,.txt,text/plain,text/csv" required>
-<p><button class="primary">Next</button></p></form></div>
+<p><button class="primary">{esc(t("Next"))}</button></p></form></div>
 {log_html(user)}
-<div class="box row" style="justify-content:space-between"><span>Make a backup or share a deck.</span>
-<a class="btn" href="/export">Export…</a></div>"""
-    return core.page("Import", body, user, "import", core.take_flash(request))
+<div class="box row" style="justify-content:space-between"><span>{esc(t("Make a backup or share a deck."))}</span>
+<a class="btn" href="/export">{esc(t("Export…"))}</a></div>"""
+    return core.page(t("Import"), body, user, "import", core.take_flash(request))
 
 
 def package_options(form, presets):
@@ -233,7 +246,7 @@ async def do_import(request: Request, file: UploadFile = File(...)):
     form = await request.form()
     ext = ext_of(file.filename)
     if ext not in PACKAGE_EXTS:
-        core.set_flash(request, "!Please choose an .apkg or .colpkg file. Text files go under “Import a text file”.")
+        core.set_flash(request, "!" + t("Please choose an .apkg or .colpkg file. Text files go under “Import a text file”."))
         return RedirectResponse("/import", 303)
     token = await save_upload(user, file, ext)
     if ext == ".colpkg":
@@ -245,11 +258,18 @@ async def do_import(request: Request, file: UploadFile = File(...)):
             log = col.import_anki_package(ImportAnkiPackageRequest(package_path=up["path"], options=opts)).log
             remember_log(user, up["name"], log)
             n_new = count_new(log)
-            extra = summarise(log).split(", ", 1)[1:]  # updated / skipped, if any
-            core.set_flash(request, f"Imported {n_new} new notes from {up['name']}"
-                           + (f" ({extra[0]})" if extra else "") + ". Details are on the Import page.")
+            extra = ", ".join(summary_parts(log)[1:])  # updated / skipped, if any
+            if extra:
+                msg = tn("Imported {n} new notes from {name} ({extra}). Details are on the Import page.",
+                         "Imported {n} new notes from {name} ({extra}). Details are on the Import page.",
+                         n_new, name=up["name"], extra=extra)
+            else:
+                msg = tn("Imported {n} new notes from {name}. Details are on the Import page.",
+                         "Imported {n} new notes from {name}. Details are on the Import page.",
+                         n_new, name=up["name"])
+            core.set_flash(request, msg)
         except Exception as e:
-            core.set_flash(request, f"!Import failed: {e}")
+            core.set_flash(request, "!" + t("Import failed: {error}", error=e))
     drop_upload(token)
     return RedirectResponse("/", 303)
 
@@ -261,23 +281,25 @@ def colpkg_confirm(request: Request, token: str):
     if not user: return core.need_login(request)
     up = get_upload(user, token)
     if not up:
-        core.set_flash(request, "!That upload has expired. Please choose the file again.")
+        core.set_flash(request, "!" + t("That upload has expired. Please choose the file again."))
         return RedirectResponse("/import", 303)
     with core.collection(user) as col:
         tr = col.tr
         notes, cards = col.note_count(), col.card_count()
-    body = f"""<div class="box"><h2 style="margin-top:0">Replace your whole collection?</h2>
+    has = core.ht(t("Your account has {notes} and {cards} now."),
+                  notes=f"<b>{esc(tn('{n} note', '{n} notes', notes))}</b>",
+                  cards=f"<b>{esc(tn('{n} card', '{n} cards', cards))}</b>")
+    body = f"""<div class="box"><h2 style="margin-top:0">{esc(t("Replace your whole collection?"))}</h2>
 <p class="flash err">{html.escape(tr.importing_this_will_delete_your_existing_collection())}</p>
-<p>File: <b>{html.escape(up['name'])}</b> ({os.path.getsize(up['path']) // 1024} KB)</p>
-<p>Your account has <b>{plural(notes, 'note')}</b> and <b>{plural(cards, 'card')}</b> now. All of them, with their
-review history, decks, note types and options, will be replaced by what is in the file.
-A backup of the current collection is saved first (in your account's <code>backups</code> folder).</p>
-<p class="muted">To add a shared deck to what you already have, use an <b>.apkg</b> file instead.</p>
+<p>{core.ht(t("File: {name} ({size} KB)"), name=f"<b>{html.escape(up['name'])}</b>", size=os.path.getsize(up['path']) // 1024)}</p>
+<p>{has} {esc(t("All of them, with their review history, decks, note types and options, will be replaced by what is in the file."))}
+{core.ht(t("A backup of the current collection is saved first (in your account's {folder} folder)."), folder="<code>backups</code>")}</p>
+<p class="muted">{core.ht(t("To add a shared deck to what you already have, use an {apkg} file instead."), apkg="<b>.apkg</b>")}</p>
 <form method="post" action="/import/colpkg/{token}">
-{check("confirm", "I understand that everything in this account will be replaced", False)}
-<div class="row" style="margin-top:12px"><button class="primary danger" style="background:var(--again);border-color:var(--again);color:#fff">Replace collection</button>
-<a class="btn" href="/import/colpkg/{token}/cancel">Cancel</a></div></form></div>"""
-    return core.page("Replace collection", body, user, "import", core.take_flash(request))
+{check("confirm", t("I understand that everything in this account will be replaced"), False)}
+<div class="row" style="margin-top:12px"><button class="primary danger" style="background:var(--again);border-color:var(--again);color:#fff">{esc(t("Replace collection"))}</button>
+<a class="btn" href="/import/colpkg/{token}/cancel">{esc(t("Cancel"))}</a></div></form></div>"""
+    return core.page(t("Replace collection"), body, user, "import", core.take_flash(request))
 
 
 @router.get("/import/colpkg/{token}/cancel")
@@ -300,25 +322,27 @@ async def colpkg_import(request: Request, token: str):
     form = await request.form()
     up = get_upload(user, token)
     if not up:
-        core.set_flash(request, "!That upload has expired. Please choose the file again.")
+        core.set_flash(request, "!" + t("That upload has expired. Please choose the file again."))
         return RedirectResponse("/import", 303)
     if not form.get("confirm"):
-        core.set_flash(request, "!Tick the box to confirm that everything will be replaced.")
+        core.set_flash(request, "!" + t("Tick the box to confirm that everything will be replaced."))
         return RedirectResponse(f"/import/colpkg/{token}", 303)
     with core.collection(user) as col:
         try:
             # Through the backups module, so its own rotation (keep 30) applies.
             maintenance.make_backup(user, col)
         except Exception as e:
-            core.set_flash(request, f"!Could not back up the current collection, so nothing was replaced: {e}")
+            core.set_flash(request, "!" + t("Could not back up the current collection, so nothing was replaced: {error}",
+                                            error=e))
             return RedirectResponse(f"/import/colpkg/{token}", 303)
         # The old Collection object is closed and a fresh one opened (the old file, if the import failed).
         ok, err = maintenance.replace_collection(user, col, up["path"])
         if ok:
-            core.set_flash(request, f"Collection replaced with {up['name']}: "
-                           f"{plural(core._cols[user].note_count(), 'note')}.")
+            core.set_flash(request, tn("Collection replaced with {name}: {n} note.",
+                                       "Collection replaced with {name}: {n} notes.",
+                                       core._cols[user].note_count(), name=up["name"]))
         else:
-            core.set_flash(request, f"!Import failed, your collection was not changed: {err}")
+            core.set_flash(request, "!" + t("Import failed, your collection was not changed: {error}", error=err))
     drop_upload(token)
     return RedirectResponse("/" if ok else "/import", 303)
 
@@ -330,7 +354,7 @@ async def csv_upload(request: Request, file: UploadFile = File(...)):
     if not user: return core.need_login(request)
     ext = ext_of(file.filename)
     if ext not in TEXT_EXTS:
-        core.set_flash(request, "!Please choose a .csv, .tsv or .txt file. Anki decks (.apkg) go under “Import a deck”.")
+        core.set_flash(request, "!" + t("Please choose a .csv, .tsv or .txt file. Anki decks (.apkg) go under “Import a deck”."))
         return RedirectResponse("/import", 303)
     token = await save_upload(user, file, ext)
     return RedirectResponse(f"/import/csv/{token}", 303)
@@ -377,19 +401,20 @@ def column_choices(m):
         label = m.column_labels[i] if i < len(m.column_labels) and m.column_labels[i] else ""
         sample = label or (first[i] if i < len(first) else "")
         sample = core.strip_html(sample)[:30]
-        out.append((i + 1, f"Column {i + 1}" + (f": {sample}" if sample else "")))
+        out.append((i + 1, t("Column {n}: {sample}", n=i + 1, sample=sample) if sample else t("Column {n}", n=i + 1)))
     return out
 
 
 def csv_form(col, user, token, up, m, error=""):
     tr = col.tr
     cols = column_choices(m)
-    nothing = [(0, "(Nothing)")]
+    nothing = [(0, t("(Nothing)"))]
+    set_by_file = esc(t("(set by the file)"))
     # separator
     if m.force_delimiter:
         delim_html = (f'<input type="hidden" name="delimiter" value="{m.delimiter}">'
-                      f'<p style="margin:0">{html.escape(dict((v, t) for v, t in delim_choices(tr))[m.delimiter])} '
-                      f'<span class="muted">(set by the file)</span></p>')
+                      f'<p style="margin:0">{html.escape(dict(delim_choices(tr))[m.delimiter])} '
+                      f'<span class="muted">{set_by_file}</span></p>')
     else:
         delim_html = (f'<select name="delimiter" class="refresh" style="width:auto">'
                       f'{options(delim_choices(tr), m.delimiter)}</select>')
@@ -397,15 +422,15 @@ def csv_form(col, user, token, up, m, error=""):
     nt_choices = [(str(n.id), n.name) for n in col.models.all_names_and_ids()]
     nt_cur = str(m.global_notetype.id) if m.HasField("global_notetype") else "column"
     if m.notetype_column:
-        nt_choices.append(("column", f"From column {m.notetype_column}"))
+        nt_choices.append(("column", t("From column {n}", n=m.notetype_column)))
     # deck
     deck_choices = [(str(d.id), d.name) for d in col.decks.all_names_and_ids(include_filtered=False)]
     which = m.WhichOneof("deck")
     if which == "deck_column":
-        deck_choices.append(("column", f"From column {m.deck_column}"))
+        deck_choices.append(("column", t("From column {n}", n=m.deck_column)))
         deck_cur = "column"
     elif which == "deck_name":
-        deck_choices.append(("name", f"{m.deck_name} (new deck)"))
+        deck_choices.append(("name", t("{deck} (new deck)", deck=m.deck_name)))
         deck_cur = "name"
     else:
         deck_cur = str(m.deck_id)
@@ -420,14 +445,14 @@ def csv_form(col, user, token, up, m, error=""):
             for i, name in enumerate(names))
         mapping = f'<div style="display:grid;gap:8px">{rows}</div>'
     else:
-        mapping = '<p class="muted">Fields are filled in order, using the note type named in each line.</p>'
+        mapping = f'<p class="muted">{esc(t("Fields are filled in order, using the note type named in each line."))}</p>'
     tags_sel = (f'<select name="tags_column" style="flex:1">{options(nothing + cols, m.tags_column)}</select>')
     # preview
     width = len(cols)
-    head = "".join(f"<th>{html.escape(t)}</th>" for _, t in cols)
+    head = "".join(f"<th>{html.escape(label)}</th>" for _, label in cols)
     prev = "".join("<tr>" + "".join(f"<td>{html.escape(core.strip_html(r.vals[i]) if i < len(r.vals) else '')[:60]}</td>"
                                     for i in range(width)) + "</tr>" for r in m.preview[:PREVIEW_ROWS])
-    more = (f'<p class="muted" style="font-size:14px">Showing the first {PREVIEW_ROWS} lines.</p>'
+    more = (f'<p class="muted" style="font-size:14px">{esc(t("Showing the first {n} lines.", n=PREVIEW_ROWS))}</p>'
             if len(m.preview) > PREVIEW_ROWS else "")
     err = f'<div class="flash err">{html.escape(error)}</div>' if error else ""
     html_on = m.is_html
@@ -435,58 +460,58 @@ def csv_form(col, user, token, up, m, error=""):
                 f'title="{html.escape(core.strip_html(tr.importing_allow_html_in_fields_help()))}">'
                 f'<input type="checkbox" name="html" value="1" class="refresh" {CHK}{" checked" if html_on else ""}'
                 f'{" disabled" if m.force_is_html else ""}> {html.escape(tr.importing_allow_html_in_fields())}'
-                f'{" <span class=muted>(set by the file)</span>" if m.force_is_html else ""}</label>')
+                f'{f" <span class=muted>{set_by_file}</span>" if m.force_is_html else ""}</label>')
     if m.force_is_html and html_on:
         html_box += '<input type="hidden" name="html" value="1">'
-    return f"""{err}<div class="box"><h2 style="margin-top:0">Import {html.escape(up['name'])}</h2>
+    return f"""{err}<div class="box"><h2 style="margin-top:0">{html.escape(t("Import {name}", name=up['name']))}</h2>
 <form id="csvform" method="post" action="/import/csv/{token}"><input type="hidden" name="sent" value="1">
 <h3 style="margin:0 0 6px">{html.escape(tr.importing_file())}</h3>
 <div class="row"><label style="margin:0;min-width:160px;color:var(--ink);font-size:17px">{html.escape(tr.importing_field_separator())}</label>{delim_html}</div>
 {html_box}
 <h3 style="margin:16px 0 6px">{html.escape(tr.importing_import_options())}</h3>
-<label for="notetype">Note type</label><select id="notetype" name="notetype" class="refresh">{options(nt_choices, nt_cur)}</select>
-<label for="deck">Deck</label><select id="deck" name="deck">{options(deck_choices, deck_cur)}</select>
+<label for="notetype">{esc(t("Note type"))}</label><select id="notetype" name="notetype" class="refresh">{options(nt_choices, nt_cur)}</select>
+<label for="deck">{esc(t("Deck"))}</label><select id="deck" name="deck">{options(deck_choices, deck_cur)}</select>
 <label for="dupe">{html.escape(tr.importing_existing_notes())}</label>
-<select id="dupe" name="dupe" title="{html.escape(tr.importing_existing_notes_help())}">{options([(v, getattr(tr, t)()) for v, t in DUPES], m.dupe_resolution)}</select>
+<select id="dupe" name="dupe" title="{html.escape(tr.importing_existing_notes_help())}">{options([(v, getattr(tr, key)()) for v, key in DUPES], m.dupe_resolution)}</select>
 <label for="scope">{html.escape(tr.importing_match_scope())}</label>
-<select id="scope" name="scope" title="{html.escape(tr.importing_match_scope_help())}">{options(SCOPES, m.match_scope)}</select>
+<select id="scope" name="scope" title="{html.escape(tr.importing_match_scope_help())}">{options([(v, t(label)) for v, label in SCOPES], m.match_scope)}</select>
 <h3 style="margin:16px 0 6px">{html.escape(tr.importing_field_mapping())}</h3>
 {mapping}
-<div class="row" style="flex-wrap:nowrap;margin-top:8px"><label style="margin:0;min-width:120px;color:var(--ink);font-size:17px">Tags</label>{tags_sel}</div>
+<div class="row" style="flex-wrap:nowrap;margin-top:8px"><label style="margin:0;min-width:120px;color:var(--ink);font-size:17px">{esc(t("Tags"))}</label>{tags_sel}</div>
 <label for="gtags">{html.escape(tr.importing_tag_all_notes())}</label>
-<input id="gtags" name="global_tags" value="{html.escape(' '.join(m.global_tags))}" autocapitalize="none" placeholder="space-separated tags">
+<input id="gtags" name="global_tags" value="{html.escape(' '.join(m.global_tags))}" autocapitalize="none" placeholder="{html.escape(t("space-separated tags"))}">
 <label for="utags">{html.escape(tr.importing_tag_updated_notes())}</label>
-<input id="utags" name="updated_tags" value="{html.escape(' '.join(m.updated_tags))}" autocapitalize="none" placeholder="space-separated tags">
-<div class="row" style="margin-top:16px"><button class="primary" name="go" value="1">Import</button>
-<button formmethod="get" formaction="/import/csv/{token}" id="refresh">Refresh preview</button>
-<a class="btn" href="/import/csv/{token}/cancel">Cancel</a></div></form></div>
-<div class="box"><h3 style="margin-top:0">Preview</h3><div style="overflow-x:auto"><table><tr>{head}</tr>{prev}</table></div>{more}</div>
+<input id="utags" name="updated_tags" value="{html.escape(' '.join(m.updated_tags))}" autocapitalize="none" placeholder="{html.escape(t("space-separated tags"))}">
+<div class="row" style="margin-top:16px"><button class="primary" name="go" value="1">{esc(t("Import"))}</button>
+<button formmethod="get" formaction="/import/csv/{token}" id="refresh">{esc(t("Refresh preview"))}</button>
+<a class="btn" href="/import/csv/{token}/cancel">{esc(t("Cancel"))}</a></div></form></div>
+<div class="box"><h3 style="margin-top:0">{esc(t("Preview"))}</h3><div style="overflow-x:auto"><table><tr>{head}</tr>{prev}</table></div>{more}</div>
 <script>document.querySelectorAll('#csvform .refresh').forEach(function(e){{e.addEventListener('change',function(){{
 document.getElementById('refresh').click();}})}});</script>"""
 
 
 def delim_choices(tr):
-    return [(v, getattr(tr, t)() if t else "Space") for v, t in DELIMS]
+    return [(v, getattr(tr, key)() if key else t("Space")) for v, key in DELIMS]
 
 
 def show_csv(request, user, token, q, error=""):
     up = get_upload(user, token)
     if not up:
-        core.set_flash(request, "!That upload has expired. Please choose the file again.")
+        core.set_flash(request, "!" + t("That upload has expired. Please choose the file again."))
         return RedirectResponse("/import", 303)
     with core.collection(user) as col:
         try:
             m = csv_metadata(col, up["path"], q)
         except Exception as e:
             drop_upload(token)
-            core.set_flash(request, f"!Could not read {up['name']}: {e}")
+            core.set_flash(request, "!" + t("Could not read {name}: {error}", name=up["name"], error=e))
             return RedirectResponse("/import", 303)
         try:  # keep what was chosen (after a refused import); a refresh shows the engine's mapping
             apply_choices(col, m, q, mapping=bool(q.get("go")))
         except ValueError:
             pass
         body = csv_form(col, user, token, up, m, error)
-    return core.page("Import text", body, user, "import")
+    return core.page(t("Import text"), body, user, "import")
 
 
 @router.get("/import/csv/{token}", response_class=HTMLResponse)
@@ -508,7 +533,7 @@ def csv_cancel(request: Request, token: str):
 def apply_choices(col, m, q, mapping=True):
     """Put the form's choices into the engine's metadata. Raises ValueError with a message for the user."""
     tr = col.tr
-    tags = lambda s: [t for t in re.split(r"\s+", s or "") if t]
+    tags = lambda s: [tag for tag in re.split(r"\s+", s or "") if tag]
     if "global_tags" in q:
         del m.global_tags[:]; m.global_tags.extend(tags(q.get("global_tags")))
     if "updated_tags" in q:
@@ -519,8 +544,8 @@ def apply_choices(col, m, q, mapping=True):
         m.match_scope = int(q["scope"])
     ncols = len(column_choices(m))
     if "tags_column" in q:
-        t = int_or(q.get("tags_column"), 0)
-        m.tags_column = t if 0 <= t <= ncols else 0
+        tc = int_or(q.get("tags_column"), 0)
+        m.tags_column = tc if 0 <= tc <= ncols else 0
     if not mapping or not m.HasField("global_notetype"):
         return
     nfields = len(col.models.get(m.global_notetype.id)["flds"])
@@ -541,24 +566,24 @@ async def csv_import(request: Request, token: str):
     q = dict(await request.form())
     up = get_upload(user, token)
     if not up:
-        core.set_flash(request, "!That upload has expired. Please choose the file again.")
+        core.set_flash(request, "!" + t("That upload has expired. Please choose the file again."))
         return RedirectResponse("/import", 303)
     with core.collection(user) as col:
         try:
             m = csv_metadata(col, up["path"], q)
             apply_choices(col, m, q)
             if not m.HasField("global_notetype") and not m.notetype_column:
-                raise ValueError("Please choose a note type.")
+                raise ValueError(t("Please choose a note type."))
             log = col.import_csv(ImportCsvRequest(path=up["path"], metadata=m)).log
         except Exception as e:
-            err = str(e) or "The import did not work."
+            err = str(e) or t("The import did not work.")
         else:
             err = ""
     if err:
         return show_csv(request, user, token, q, err)
     remember_log(user, up["name"], log)
     drop_upload(token)
-    core.set_flash(request, f"Imported {up['name']}: {summarise(log)}.")
+    core.set_flash(request, t("Imported {name}: {summary}.", name=up["name"], summary=summarise(log)))
     return RedirectResponse("/import#log", 303)
 
 
@@ -594,13 +619,14 @@ def export_page(request: Request, did: int = 0, q: str = "", fmt: str = ""):
         fmt = "apkg" if (did or q) else "colpkg"
     scope = [("0", tr.exporting_all_decks())]
     if q:
-        scope.append(("search", f"{tr.exporting_selected_notes()} ({plural(n_sel, 'note')} from Browse)"))
+        scope.append(("search", tn("{selected} ({n} note from Browse)", "{selected} ({n} notes from Browse)",
+                                   n_sel, selected=tr.exporting_selected_notes())))
     scope += decks
     cur_scope = "search" if q else str(did)
     radios = "".join(
         f'<label class="row" style="margin:6px 0;color:var(--ink);font-size:17px;min-height:44px">'
         f'<input type="radio" name="fmt" value="{k}" {CHK}{" checked" if k == fmt else ""}> '
-        f'{html.escape(getattr(tr, t)())} <span class="muted">({ext})</span></label>' for k, t, ext in FORMATS)
+        f'{html.escape(getattr(tr, key)())} <span class="muted">({ext})</span></label>' for k, key, ext in FORMATS)
     labels = {"scheduling": tr.exporting_include_scheduling_information(), "deck_configs": tr.exporting_include_deck_configs(),
               "media": tr.exporting_include_media(), "legacy": tr.exporting_support_older_anki_versions(),
               "html": tr.exporting_include_html_and_media_references(), "tags": tr.exporting_include_tags(),
@@ -609,18 +635,19 @@ def export_page(request: Request, did: int = 0, q: str = "", fmt: str = ""):
     opts = "".join(
         f'<div data-fmts="{" ".join(f for f, o in FORMAT_OPTS.items() if k in o)}">{check(k, labels[k], OPT_DEFAULTS[k])}</div>'
         for k in OPT_DEFAULTS)
-    body = f"""<div class="box"><h2 style="margin-top:0">Export</h2>
+    body = f"""<div class="box"><h2 style="margin-top:0">{esc(t("Export"))}</h2>
 <form id="expform" method="post" action="/export"><input type="hidden" name="q" value="{html.escape(q)}">
-<h3 style="margin:0 0 4px">Format</h3>{radios}
-<div data-fmts="apkg notes cards"><label for="scope">Include</label>
+<h3 style="margin:0 0 4px">{esc(t("Format"))}</h3>{radios}
+<div data-fmts="apkg notes cards"><label for="scope">{esc(t("Include"))}</label>
 <select id="scope" name="scope">{options(scope, cur_scope)}</select></div>
-<div data-fmts="colpkg"><p class="muted" style="font-size:15px">A collection package holds everything in this
-account: all decks, note types, options, review history and (if ticked) media. Importing it replaces a whole
-collection, so it is the format for backups and for moving to desktop Anki.</p></div>
-<h3 style="margin:14px 0 4px">Options</h3>{opts}
-<div class="row" style="margin-top:14px"><button class="primary">Export</button>
-<a class="btn" href="/import">Back</a></div></form></div>{EXPORT_JS}"""
-    return core.page("Export", body, user, "import", core.take_flash(request) or err)
+<div data-fmts="colpkg"><p class="muted" style="font-size:15px">{esc(t(
+        "A collection package holds everything in this account: all decks, note types, options, review history and "
+        "(if ticked) media. Importing it replaces a whole collection, so it is the format for backups and for moving "
+        "to desktop Anki."))}</p></div>
+<h3 style="margin:14px 0 4px">{esc(t("Options"))}</h3>{opts}
+<div class="row" style="margin-top:14px"><button class="primary">{esc(t("Export"))}</button>
+<a class="btn" href="/import">{esc(t("← Back"))}</a></div></form></div>{EXPORT_JS}"""
+    return core.page(t("Export"), body, user, "import", core.take_flash(request) or err)
 
 
 def safe_name(name, default):
@@ -634,7 +661,7 @@ async def do_export(request: Request):
     form = await request.form()
     fmt = form.get("fmt", "")
     if fmt not in FORMAT_OPTS:
-        core.set_flash(request, "!Please choose an export format.")
+        core.set_flash(request, "!" + t("Please choose an export format."))
         return RedirectResponse("/export", 303)
     on = lambda k: bool(form.get(k)) if k in FORMAT_OPTS[fmt] else False
     q = form.get("q", "")
@@ -651,7 +678,7 @@ async def do_export(request: Request):
                 elif int_or(scope, 0):
                     did = int(scope)
                     if not col.decks.get(did, default=False):
-                        raise ValueError("That deck no longer exists.")
+                        raise ValueError(t("That deck no longer exists."))
                     limit, label = DeckIdLimit(did), col.decks.name(did)
             if fmt == "colpkg":
                 name = f"collection-{stamp}.colpkg"
@@ -680,7 +707,7 @@ async def do_export(request: Request):
                 col.export_card_csv(out_path=out, limit=limit, with_html=on("html"))
         except Exception as e:
             shutil.rmtree(out_dir, ignore_errors=True)
-            core.set_flash(request, f"!Export failed: {e}")
+            core.set_flash(request, "!" + t("Export failed: {error}", error=e))
             back = "/export" + ("?" + urlencode({"q": q}) if q else "")
             return RedirectResponse(back, 303)
     media = "text/plain; charset=utf-8" if fmt in ("notes", "cards") else "application/octet-stream"

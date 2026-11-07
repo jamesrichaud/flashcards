@@ -18,9 +18,12 @@ from fastapi.responses import JSONResponse, RedirectResponse, Response
 
 import app as core
 from flashcards import addons
+from flashcards.i18n import t, N_
 
-NAME = "AnkiConnect (API for other apps)"
-MENU = [("My API key", "/settings")]
+NAME = "AnkiConnect (API for other apps)"   # plain literal: flashcards/addons.py reads it without importing
+N_("AnkiConnect (API for other apps)")      # ...so mark it for translation here
+N_('Lets other apps add and read cards (AnkiConnect-compatible API, protected by a personal key).')  # the first docstring line, shown on the Add-ons page
+MENU = [(N_("My API key"), "/settings")]
 PUBLIC_PATHS = ("/",)          # the API itself checks the personal key instead of a login
 API_VERSION = 6
 _lock = threading.Lock()
@@ -111,7 +114,7 @@ def _build_note(col, spec):
             for fld in item.get("fields") or []:
                 if fld in note:
                     note[fld] += tag
-    note.tags = [str(t) for t in spec.get("tags") or []]
+    note.tags = [str(tag) for tag in spec.get("tags") or []]
     return note, did
 
 
@@ -300,18 +303,24 @@ def settings_page(request: Request):
     has = user in load_keys().values()
     new = request.session.pop("ac_new_key", "")
     url = str(request.base_url).rstrip("/") + "/addon/ankiconnect/"
-    shown = (f'<p>Your new key (copy it now, it won\'t be shown again):</p>'
+    e = lambda s: html.escape(s, quote=False)
+    copy_now = t("Your new key (copy it now, it won't be shown again):")
+    shown = (f'<p>{e(copy_now)}</p>'
              f'<input readonly value="{html.escape(new)}" onclick="this.select()" style="font-family:monospace">'
              if new else "")
+    status = t("you have a key") if has else t("no key yet")
+    revoke_btn = (f'<button formaction="/addon/ankiconnect/settings/revoke" class="danger">'
+                  f'{e(t("Remove my key"))}</button>' if has else '')
     body = f"""<div class="box"><h2 style="margin-top:0">AnkiConnect</h2>
-<p>Lets other apps add cards to <b>your</b> collection. In the other app, set the AnkiConnect address to:</p>
+<p>{t("Lets other apps add cards to <b>your</b> collection. In the other app, set the AnkiConnect "
+      "address to:")}</p>
 <input readonly value="{html.escape(url)}" onclick="this.select()" style="font-family:monospace">
-<p>and paste your personal key into its "API key" box.</p>{shown}
-<p class="muted">Status: {"you have a key" if has else "no key yet"}. Making a new key replaces the old one.</p>
+<p>{e(t('and paste your personal key into its "API key" box.'))}</p>{shown}
+<p class="muted">{e(t("Status: {status}. Making a new key replaces the old one.", status=status))}</p>
 <form method="post" action="/addon/ankiconnect/settings/new" class="row">
-<button class="primary">{"Make a new key" if has else "Make my key"}</button>
-{'<button formaction="/addon/ankiconnect/settings/revoke" class="danger">Remove my key</button>' if has else ''}
-<a class="btn" href="/addons">Back to add-ons</a></form></div>"""
+<button class="primary">{e(t("Make a new key") if has else t("Make my key"))}</button>
+{revoke_btn}
+<a class="btn" href="/addons">{e(t("Back to add-ons"))}</a></form></div>"""
     return addons.page(request, "AnkiConnect", body)
 
 

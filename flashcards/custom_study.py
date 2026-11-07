@@ -15,11 +15,13 @@ from anki.consts import DYN_MAX_SIZE
 from anki.errors import CustomStudyError, NotFoundError
 
 import app as core
+from flashcards.i18n import t, N_
 
 router = APIRouter()
 # The engine leaves an empty "Default" deck out of its deck tree (desktop Anki hides it), and its
 # custom study calls then fail with NotFoundError; Anki gives no way to get there, so say why.
-NOT_IN_TREE = "!Custom study isn't available here: this deck is empty and hidden from the deck list."
+# Shown as an error flash: "!" + t(NOT_IN_TREE).
+NOT_IN_TREE = N_("Custom study isn't available here: this deck is empty and hidden from the deck list.")
 Req = scheduler_pb2.CustomStudyRequest
 Cram = Req.Cram
 
@@ -90,30 +92,31 @@ def custom_html(col, did, mode="new"):
     kinds = "".join(f'<option value="{k}"{" selected" if k == Cram.CRAM_KIND_NEW else ""}>'
                     f'{html.escape(getattr(tr, fn)())}</option>' for k, fn in KINDS)
     tags_in = tags_out = ""
-    for t in d.tags:
-        n = html.escape(t.name)
+    for tag in d.tags:
+        n = html.escape(tag.name)
         tags_in += (f'<label class="row" style="margin:4px 0;color:var(--ink)"><input type="checkbox" name="include" '
-                    f'value="{n}" style="width:22px;height:22px"{" checked" if t.include else ""}> {n}</label>')
+                    f'value="{n}" style="width:22px;height:22px"{" checked" if tag.include else ""}> {n}</label>')
         tags_out += (f'<label class="row" style="margin:4px 0;color:var(--ink)"><input type="checkbox" name="exclude" '
-                     f'value="{n}" style="width:22px;height:22px"{" checked" if t.exclude else ""}> {n}</label>')
+                     f'value="{n}" style="width:22px;height:22px"{" checked" if tag.exclude else ""}> {n}</label>')
     tag_box = ""
     if d.tags:
         tag_box = f"""<div class="row" style="align-items:flex-start;gap:24px;margin-top:8px">
 <div style="flex:1;min-width:220px"><label>{html.escape(tr.custom_study_require_one_or_more_of_these())}</label>
-<p class="muted" style="font-size:14px;margin:0 0 6px">Tick none to allow any tag.</p>{tags_in}</div>
+<p class="muted" style="font-size:14px;margin:0 0 6px">{t("Tick none to allow any tag.")}</p>{tags_in}</div>
 <div style="flex:1;min-width:220px"><label>{html.escape(tr.custom_study_select_tags_to_exclude())}</label>{tags_out}</div></div>"""
     parts["cram"] = (number("cram_limit", 100, tr.custom_study_select(), tr.custom_study_cards_from_the_deck(count=100))
-                     + f'<label for="cram_kind">Cards</label><select id="cram_kind" name="cram_kind">{kinds}</select>'
+                     + f'<label for="cram_kind">{t("Cards")}</label><select id="cram_kind" name="cram_kind">{kinds}</select>'
                      + tag_box)
     sections = "".join(f'<div class="cs-part" data-mode="{m}">{parts[m]}</div>' for m in MODES)
     deck = col.decks.name(did)
-    empty = "" if count else '<p class="muted">This deck has no cards, so only the limit options are available.</p>'
+    empty = ("" if count else
+             '<p class="muted">' + t("This deck has no cards, so only the limit options are available.") + "</p>")
     return f"""<div class="box"><h2 style="margin-top:0">{html.escape(tr.actions_custom_study())}</h2>
 <p class="muted" style="margin-top:-6px">{html.escape(deck)}</p>{empty}
 <form method="post" action="/deck/{did}/custom" id="csform">{radios}
 <div class="box" style="margin:14px 0 0;background:var(--bg)">{sections}</div>
 <div class="row" style="margin-top:16px"><button class="primary">{html.escape(tr.custom_study_ok())}</button>
-<a class="btn" href="/deck/{did}">Cancel</a></div></form></div>{JS}"""
+<a class="btn" href="/deck/{did}">{t("Cancel")}</a></div></form></div>{JS}"""
 
 
 def form_int(form, name, default):
@@ -121,7 +124,7 @@ def form_int(form, name, default):
     try:
         v = int(str(form.get(name, default)).strip())
     except ValueError:
-        raise ValueError("Please enter a whole number.")
+        raise ValueError(t("Please enter a whole number."))
     return max(lo, min(hi, v))
 
 
@@ -141,13 +144,13 @@ def build_request(did, form):
     elif mode == "cram":
         kind = int(form.get("cram_kind", Cram.CRAM_KIND_NEW))
         if kind not in dict(KINDS):
-            raise ValueError("Unknown card choice.")
+            raise ValueError(t("Unknown card choice."))
         req.cram.kind = kind
         req.cram.card_limit = form_int(form, "cram_limit", 100)
         req.cram.tags_to_include.extend(form.getlist("include"))
         req.cram.tags_to_exclude.extend(form.getlist("exclude"))
     else:
-        raise ValueError("Choose an option.")
+        raise ValueError(t("Choose an option."))
     return mode, req
 
 
@@ -159,14 +162,14 @@ def custom_page(request: Request, did: int, mode: str = "new"):
         deck = col.decks.get(did, default=False)
         if not deck: return RedirectResponse("/", 303)
         if deck.get("dyn"):
-            core.set_flash(request, "!Custom study is only available for normal decks.")
+            core.set_flash(request, "!" + t("Custom study is only available for normal decks."))
             return RedirectResponse(f"/deck/{did}", 303)
         try:
             body = custom_html(col, did, mode if mode in MODES else "new")
         except NotFoundError:
-            core.set_flash(request, NOT_IN_TREE)
+            core.set_flash(request, "!" + t(NOT_IN_TREE))
             return RedirectResponse(f"/deck/{did}", 303)
-    return core.page("Custom study", body, user, "decks", core.take_flash(request))
+    return core.page(t("Custom study"), body, user, "decks", core.take_flash(request))
 
 
 @router.post("/deck/{did}/custom")
@@ -178,7 +181,7 @@ async def custom_save(request: Request, did: int):
         deck = col.decks.get(did, default=False)
         if not deck: return RedirectResponse("/", 303)
         if deck.get("dyn"):
-            core.set_flash(request, "!Custom study is only available for normal decks.")
+            core.set_flash(request, "!" + t("Custom study is only available for normal decks."))
             return RedirectResponse(f"/deck/{did}", 303)
         try:
             mode, req = build_request(did, form)
@@ -189,14 +192,14 @@ async def custom_save(request: Request, did: int):
             back = form.get("mode") if form.get("mode") in MODES else "new"
             return RedirectResponse(f"/deck/{did}/custom?mode={back}", 303)
         except NotFoundError:
-            core.set_flash(request, NOT_IN_TREE)
+            core.set_flash(request, "!" + t(NOT_IN_TREE))
             return RedirectResponse(f"/deck/{did}", 303)
         if mode in ("new", "rev"):
             core.select_deck(col, did)
-            core.set_flash(request, "Today's limit was changed.")
+            core.set_flash(request, t("Today's limit was changed."))
             return RedirectResponse(f"/deck/{did}", 303)
         # The engine made "Custom Study Session" the current deck.
         new_did = col.decks.get_current_id()
-    core.set_flash(request, "Custom study session created.")
+    core.set_flash(request, t("Custom study session created."))
     return RedirectResponse(f"/deck/{new_did}", 303)
 

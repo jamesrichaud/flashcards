@@ -11,18 +11,23 @@ How input is handled (see NOTES.md, "Whiteboard"):
 - two fingers always scroll; a short still tap with a finger or mouse goes through to the card
   (links, buttons, add-on buttons, the type-in box, and tap-to-answer if it is on).
 """
-import json
+import html, json
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, Response
 
 import app as core
+from flashcards.i18n import t, N_
 
 router = APIRouter()
 
 WB_KEY = "flashcardsWhiteboard"
 COLORS = {"black": "#111111", "white": "#ffffff", "red": "#e5484d", "blue": "#2f6fde"}
-WIDTHS = {2: "Thin", 4: "Medium", 8: "Thick"}
+# Button labels per colour: (title, aria-label). Translated when the bar is drawn.
+COLOR_LABELS = {"black": (N_("Black"), N_("Black pen")), "white": (N_("White"), N_("White pen")),
+                "red": (N_("Red"), N_("Red pen")), "blue": (N_("Blue"), N_("Blue pen"))}
+WIDTHS = {2: N_("Thin"), 4: N_("Medium"), 8: N_("Thick")}
+WIDTH_PEN_LABELS = {2: N_("Thin pen"), 4: N_("Medium pen"), 8: N_("Thick pen")}
 DEFAULT = {"on": False, "color": "", "width": 4}   # colour "" = black, or white in dark mode
 
 
@@ -65,20 +70,25 @@ async def save(request: Request):
 
 def toggle_html(conf):
     on = "true" if conf["on"] else "false"
-    return (f'<button type="button" id="wbtoggle" aria-pressed="{on}" title="Whiteboard" '
-            f'aria-label="Whiteboard">✏️<span class="wbl"> Whiteboard</span></button>')
+    label = html.escape(t("Whiteboard"))
+    return (f'<button type="button" id="wbtoggle" aria-pressed="{on}" title="{label}" '
+            f'aria-label="{label}">✏️<span class="wbl"> {label}</span></button>')
 
 
 def bar_html(conf):
-    sw = "".join(f'<button type="button" class="wbc" data-wbc="{k}" aria-label="{k.title()} pen" title="{k.title()}">'
+    a = html.escape   # attribute text
+    sw = "".join(f'<button type="button" class="wbc" data-wbc="{k}" aria-label="{a(t(COLOR_LABELS[k][1]))}" '
+                 f'title="{a(t(COLOR_LABELS[k][0]))}">'
                  f'<span style="background:{v}"></span></button>' for k, v in COLORS.items())
-    ww = "".join(f'<button type="button" class="wbw" data-wbw="{w}" aria-label="{t} pen" title="{t}">'
-                 f'<span style="width:{w + 4}px;height:{w + 4}px"></span></button>' for w, t in WIDTHS.items())
+    ww = "".join(f'<button type="button" class="wbw" data-wbw="{w}" aria-label="{a(t(WIDTH_PEN_LABELS[w]))}" '
+                 f'title="{a(t(name))}">'
+                 f'<span style="width:{w + 4}px;height:{w + 4}px"></span></button>' for w, name in WIDTHS.items())
+    e = lambda s: html.escape(s, False)   # text nodes
     return f"""<div id="wbbar" class="row" style="{'' if conf['on'] else 'display:none'}">
 <div class="wbg">{sw}</div><div class="wbg">{ww}</div>
-<button type="button" id="wberase" aria-pressed="false">Eraser</button>
-<button type="button" id="wbundo" title="Undo last stroke">↶ Undo stroke</button>
-<button type="button" id="wbclear">Clear</button></div>"""
+<button type="button" id="wberase" aria-pressed="false">{e(t("Eraser"))}</button>
+<button type="button" id="wbundo" title="{a(t("Undo last stroke"))}">{e(t("↶ Undo stroke"))}</button>
+<button type="button" id="wbclear">{e(t("Clear"))}</button></div>"""
 
 
 CSS = """#wbwrap{position:relative}#wb{position:absolute;left:0;top:0;border-radius:14px;touch-action:none;
@@ -182,5 +192,5 @@ const WB=fcWhiteboard({{canvas:document.getElementById('wb'),frame:fr,bar:docume
  dark:()=>{{const c=document.documentElement.classList;return c.contains('dark')||(!c.contains('light')&&matchMedia('(prefers-color-scheme:dark)').matches);}},
  save:async ch=>{{try{{const r=await(await fetch('/study/whiteboard',{{method:'POST',body:JSON.stringify(ch),
   headers:{{'Content-Type':'application/json','X-Requested-With':'fetch'}}}})).json();
-  if(r.stamp&&window.fcStampSeen)fcStampSeen(r.stamp);}}catch(e){{toast("Couldn't save the whiteboard setting.");}}}}}});
+  if(r.stamp&&window.fcStampSeen)fcStampSeen(r.stamp);}}catch(e){{toast({core.js(t("Couldn't save the whiteboard setting."))});}}}}}});
 </script>"""

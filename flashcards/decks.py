@@ -17,6 +17,7 @@ from anki.collection import ExportAnkiPackageOptions, DeckIdLimit
 from anki.decks import DeckCollapseScope
 
 import app as core
+from flashcards.i18n import t, tn
 
 router = APIRouter()
 DEFAULT_DECK_ID = 1
@@ -105,9 +106,9 @@ class DescCleaner(HTMLParser):
         if self.skip or tag not in self.open:
             return
         while self.open:
-            t = self.open.pop()
-            self.out.append(f"</{t}>")
-            if t == tag:
+            tg = self.open.pop()
+            self.out.append(f"</{tg}>")
+            if tg == tag:
                 break
 
     def handle_data(self, data):
@@ -116,7 +117,7 @@ class DescCleaner(HTMLParser):
 
     def result(self):
         self.close()
-        return "".join(self.out) + "".join(f"</{t}>" for t in reversed(self.open))
+        return "".join(self.out) + "".join(f"</{tg}>" for tg in reversed(self.open))
 
 
 def desc_html(deck):
@@ -153,7 +154,8 @@ def decks(request: Request):
                 pad = depth * 22
                 name = html.escape(ch.name)
                 if ch.children:
-                    sign, label = ("+", f"Expand {name}") if ch.collapsed else ("−", f"Collapse {name}")
+                    sign, label = (("+", html.escape(t("Expand {name}", name=ch.name))) if ch.collapsed
+                                   else ("−", html.escape(t("Collapse {name}", name=ch.name))))
                     tg = (f'<form method="post" action="/deck/{ch.deck_id}/collapse">'
                           f'<input type="hidden" name="collapsed" value="{0 if ch.collapsed else 1}">'
                           f'<button class="tg" title="{label}" aria-label="{label}" '
@@ -169,17 +171,17 @@ def decks(request: Request):
 
         walk(tree, 0)
         today = clean_msg(col.studied_today())
-    body = f"""{DECK_CSS}<div class="box"><table class="dl"><tr><th>Deck</th><th class="n">New</th><th class="n">Learn</th>
-<th class="n">Due</th></tr>{''.join(rows) or '<tr><td colspan=4 class="muted">No decks yet.</td></tr>'}</table></div>
+    body = f"""{DECK_CSS}<div class="box"><table class="dl"><tr><th>{t("Deck")}</th><th class="n">{t("New")}</th><th class="n">{t("Learn")}</th>
+<th class="n">{t("Due")}</th></tr>{''.join(rows) or '<tr><td colspan=4 class="muted">' + t("No decks yet.") + '</td></tr>'}</table></div>
 <p class="today muted" id="studied-today">{html.escape(today)}</p>
 <div class="box"><form method="post" action="/deck/new" class="row">
-<input name="name" placeholder="New deck name (use :: for subdecks)" style="flex:1" required>
-<button>Create deck</button></form>
-<div class="row" style="margin-top:10px"><a class="btn" href="/filtered/new">Create filtered deck</a>
-<a class="btn" href="/import">Import file</a>
-<a class="btn" href="{SHARED_DECKS_URL}" target="_blank" rel="noopener noreferrer">Get shared decks ↗</a>
-<a class="btn" href="/sync">Sync</a></div></div>"""
-    return core.page("Decks", body, user, "decks", flash)
+<input name="name" placeholder="{html.escape(t("New deck name (use :: for subdecks)"))}" style="flex:1" required>
+<button>{t("Create deck")}</button></form>
+<div class="row" style="margin-top:10px"><a class="btn" href="/filtered/new">{t("Create filtered deck")}</a>
+<a class="btn" href="/import">{t("Import file")}</a>
+<a class="btn" href="{SHARED_DECKS_URL}" target="_blank" rel="noopener noreferrer">{t("Get shared decks ↗")}</a>
+<a class="btn" href="/sync">{t("Sync")}</a></div></div>"""
+    return core.page(t("Decks"), body, user, "decks", flash)
 
 
 @router.post("/deck/new")
@@ -237,44 +239,52 @@ def deck_overview(request: Request, did: int):
         targets = move_targets(col, did)
     opts = ""
     if conf:
-        opts = f"""<div class="box row"><div style="flex:1;min-width:200px"><h3 style="margin:0">Deck options</h3>
-<span class="muted" style="font-size:14px">Preset “{html.escape(conf['name'])}”: {conf['new']['perDay']} new/day,
-{conf['rev']['perDay']} reviews/day</span></div><a class="btn" href="/deck/{did}/custom">Custom study</a>
-<a class="btn" href="/deck/{did}/options">Options</a></div>"""
+        preset = t("Preset “{name}”: {new} new/day,\n{rev} reviews/day", name=html.escape(conf["name"]),
+                   new=conf["new"]["perDay"], rev=conf["rev"]["perDay"])
+        opts = f"""<div class="box row"><div style="flex:1;min-width:200px"><h3 style="margin:0">{t("Deck options")}</h3>
+<span class="muted" style="font-size:14px">{preset}</span></div><a class="btn" href="/deck/{did}/custom">{t("Custom study")}</a>
+<a class="btn" href="/deck/{did}/options">{t("Options")}</a></div>"""
     else:
-        opts = f"""<div class="box row"><div style="flex:1;min-width:200px"><h3 style="margin:0">Filtered deck</h3>
-<span class="muted" style="font-size:14px">Cards are borrowed from their home decks until the deck is emptied.</span></div>
-<a class="btn" href="/deck/{did}/filtered">Options</a>
-<form method="post" action="/deck/{did}/rebuild"><button>Rebuild</button></form>
-<form method="post" action="/deck/{did}/empty"><button>Empty</button></form></div>"""
-    desc_btn = (f'<a class="btn" href="/deck/{did}/description">Description</a>' if conf else "")
-    choices = [f'<option value="0"{" selected" if not parent else ""}>(top level)</option>']
+        opts = f"""<div class="box row"><div style="flex:1;min-width:200px"><h3 style="margin:0">{t("Filtered deck")}</h3>
+<span class="muted" style="font-size:14px">{t("Cards are borrowed from their home decks until the deck is emptied.")}</span></div>
+<a class="btn" href="/deck/{did}/filtered">{t("Options")}</a>
+<form method="post" action="/deck/{did}/rebuild"><button>{t("Rebuild")}</button></form>
+<form method="post" action="/deck/{did}/empty"><button>{t("Empty")}</button></form></div>"""
+    desc_btn = (f'<a class="btn" href="/deck/{did}/description">{t("Description")}</a>' if conf else "")
+    choices = [f'<option value="0"{" selected" if not parent else ""}>{t("(top level)")}</option>']
+    # English has always said "1 cards in deck"; both forms kept the same so English output is unchanged.
+    in_deck = tn("{n} cards in deck", "{n} cards in deck", total)
+    if new + lrn + rev:
+        study = f'<a class="btn primary" style="min-width:200px" href="/study/{did}">{t("Study now")}</a>'
+    else:
+        study = "<p>" + t("Congratulations! You have finished this deck for now.") + "</p>"
+        if conf:
+            link = f'<a href="/deck/{did}/custom">{t("Custom study")}</a>'
+            study += ('<p class="muted">' + t("To study outside the regular schedule, use {link}.", link=link)
+                      + "</p>")
     for tid, tname in targets:
         sel = " selected" if tname == parent else ""
         choices.append(f'<option value="{tid}"{sel}>{html.escape(tname)}</option>')
     body = f"""{DECK_CSS}<div class="box" style="text-align:center"><h2 style="margin-top:0">{html.escape(deck['name'])}</h2>
 {desc_html(deck) if conf else ''}
 <div class="row" style="justify-content:center;gap:28px;font-size:20px">
-<span class="new">New <b>{new}</b></span><span class="lrn">Learning <b>{lrn}</b></span>
-<span class="rev">To review <b>{rev}</b></span></div>
-<p class="muted">{total} cards in deck</p>
-{'<a class="btn primary" style="min-width:200px" href="/study/%d">Study now</a>' % did if new + lrn + rev
- else '<p>Congratulations! You have finished this deck for now.</p>' + (
- f'<p class="muted">To study outside the regular schedule, use <a href="/deck/{did}/custom">Custom study</a>.</p>'
- if conf else '')}
+<span class="new">{t("New {n}", n=f"<b>{new}</b>")}</span><span class="lrn">{t("Learning {n}", n=f"<b>{lrn}</b>")}</span>
+<span class="rev">{t("To review {n}", n=f"<b>{rev}</b>")}</span></div>
+<p class="muted">{in_deck}</p>
+{study}
 </div>{opts}
-<div class="box row"><a class="btn" href="/browse?q=%22deck:{html.escape(deck['name'])}%22">Browse cards</a>
-<a class="btn" href="/export?did={did}">Export…</a>
-<a class="btn" href="/stats?did={did}">Stats</a>{desc_btn}</div>
+<div class="box row"><a class="btn" href="/browse?q=%22deck:{html.escape(deck['name'])}%22">{t("Browse cards")}</a>
+<a class="btn" href="/export?did={did}">{t("Export…")}</a>
+<a class="btn" href="/stats?did={did}">{t("Stats")}</a>{desc_btn}</div>
 <div class="box"><form method="post" action="/deck/{did}/rename" class="row">
-<input name="name" value="{html.escape(deck['name'])}" style="flex:1;min-width:200px" aria-label="Deck name"><button>Rename</button></form>
+<input name="name" value="{html.escape(deck['name'])}" style="flex:1;min-width:200px" aria-label="{html.escape(t("Deck name"))}"><button>{t("Rename")}</button></form>
 <form method="post" action="/deck/{did}/move" class="row" style="margin-top:10px">
-<label for="move-to" style="margin:0">Move under</label>
+<label for="move-to" style="margin:0">{t("Move under")}</label>
 <select id="move-to" name="parent" style="flex:1;width:auto;min-width:200px">{''.join(choices)}</select>
-<button>Move</button></form>
+<button>{t("Move")}</button></form>
 <form method="post" action="/deck/{did}/delete" style="margin-top:10px"
- onsubmit="return confirm('Delete this deck and all its cards?')">
-<button class="danger">Delete deck</button></form></div>"""
+ onsubmit="return confirm({html.escape(core.js(t("Delete this deck and all its cards?")))})">
+<button class="danger">{t("Delete deck")}</button></form></div>"""
     return core.page(deck["name"], body, user, "decks", core.take_flash(request))
 
 
@@ -283,7 +293,7 @@ def deck_rename(request: Request, did: int, name: str = Form("")):
     user = core.current_user(request)
     if not user: return core.need_login(request)
     if not name.strip():
-        core.set_flash(request, "!Please type a deck name.")
+        core.set_flash(request, "!" + t("Please type a deck name."))
         return RedirectResponse(f"/deck/{did}", 303)
     with core.collection(user) as col:
         try:
@@ -302,7 +312,7 @@ def deck_move(request: Request, did: int, parent: int = Form(0)):
         if not col.decks.get(did, default=False):
             return RedirectResponse("/", 303)
         if parent and not col.decks.get(parent, default=False):
-            core.set_flash(request, "!That deck no longer exists.")
+            core.set_flash(request, "!" + t("That deck no longer exists."))
             return RedirectResponse(f"/deck/{did}", 303)
         old = col.decks.name(did)
         try:
@@ -314,8 +324,8 @@ def deck_move(request: Request, did: int, parent: int = Form(0)):
         if parent:
             # Show the new home expanded, so the moved deck can be seen in the list.
             col.decks.set_collapsed(parent, False, DeckCollapseScope.REVIEWER)
-    core.set_flash(request, f"Moved “{old}” to “{new}”." if moved and new != old
-                   else "!The deck can't be moved there.")
+    core.set_flash(request, t("Moved “{old}” to “{new}”.", old=old, new=new) if moved and new != old
+                   else "!" + t("The deck can't be moved there."))
     return RedirectResponse(f"/deck/{did}", 303)
 
 
@@ -327,17 +337,19 @@ def deck_description_page(request: Request, did: int):
         deck = col.decks.get(did, default=False)
         if not deck or deck.get("dyn"):
             return RedirectResponse(f"/deck/{did}" if deck else "/", 303)
-    md = ('<p class="muted" style="font-size:14px">This description was written in desktop Anki with markdown '
-          'on; it is shown as plain text here. Saving here turns markdown off.</p>' if deck.get("md") else "")
-    body = f"""{DECK_CSS}<div class="box"><h2 style="margin-top:0">Description: {html.escape(deck['name'])}</h2>
-<p class="muted" style="font-size:14px">Shown on the deck's overview screen. Basic HTML is allowed
-(e.g. &lt;b&gt;, &lt;i&gt;, &lt;a href&gt;, &lt;img src&gt;); scripts and styles are not shown.</p>{md}
-<form method="post"><label for="desc">Description</label>
+    md = ('<p class="muted" style="font-size:14px">' + t("This description was written in desktop Anki with markdown "
+          "on; it is shown as plain text here. Saving here turns markdown off.") + "</p>" if deck.get("md") else "")
+    allowed = t("Shown on the deck's overview screen. Basic HTML is allowed\n(e.g. {tags}); scripts and styles are not shown.",
+                tags="&lt;b&gt;, &lt;i&gt;, &lt;a href&gt;, &lt;img src&gt;")
+    title = t("Description: {name}", name=html.escape(deck["name"]))
+    body = f"""{DECK_CSS}<div class="box"><h2 style="margin-top:0">{title}</h2>
+<p class="muted" style="font-size:14px">{allowed}</p>{md}
+<form method="post"><label for="desc">{t("Description")}</label>
 <textarea id="desc" name="desc" style="min-height:220px" maxlength="{DESC_MAX}">{html.escape(deck.get('desc') or '')}</textarea>
-<div class="row" style="margin-top:12px"><button class="primary">Save</button>
-<a class="btn" href="/deck/{did}">Cancel</a></div></form></div>
-<div class="box"><h3 style="margin-top:0">Preview</h3>{desc_html(deck) or '<p class="muted">No description.</p>'}</div>"""
-    return core.page("Description", body, user, "decks", core.take_flash(request))
+<div class="row" style="margin-top:12px"><button class="primary">{t("Save")}</button>
+<a class="btn" href="/deck/{did}">{t("Cancel")}</a></div></form></div>
+<div class="box"><h3 style="margin-top:0">{t("Preview")}</h3>{desc_html(deck) or '<p class="muted">' + t("No description.") + '</p>'}</div>"""
+    return core.page(t("Description"), body, user, "decks", core.take_flash(request))
 
 
 @router.post("/deck/{did}/description")
@@ -351,7 +363,7 @@ def deck_description_save(request: Request, did: int, desc: str = Form("")):
         deck["desc"] = desc.replace("\r\n", "\n")[:DESC_MAX]
         deck["md"] = False
         col.decks.update_dict(deck)
-    core.set_flash(request, "Description saved.")
+    core.set_flash(request, t("Description saved."))
     return RedirectResponse(f"/deck/{did}", 303)
 
 
@@ -361,7 +373,7 @@ def deck_delete(request: Request, did: int):
     if not user: return core.need_login(request)
     with core.collection(user) as col:
         col.decks.remove([did])
-    core.set_flash(request, "Deck deleted.")
+    core.set_flash(request, t("Deck deleted."))
     return RedirectResponse("/", 303)
 
 

@@ -15,6 +15,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 
 import app as core
 from flashcards.editor import IMAGE_EXTS, MAX_UPLOAD
+from flashcards.i18n import t, tn
 
 router = APIRouter()
 
@@ -244,7 +245,8 @@ function render(){
  q('ungroup').disabled=!shapes.some(s=>sel.has(s.id)&&shapes.some(o=>o!==s&&o.ordinal===s.ordinal));
  q('undo').disabled=!undo.length;q('redo').disabled=!redo.length;q('multi').setAttribute('aria-pressed',multi);
  const n=new Set(shapes.filter(s=>s.shape!=='text').map(s=>s.ordinal)).size;
- $('io-count').textContent=n?(n===1?'1 card':n+' cards'):'';}
+ $('io-count').textContent=n?cardsText(n):'';}
+function cardsText(n){const P=C.msgs.cards,f=P.forms[+P.idx[n<P.idx.length?n:100+n%100]];return f.split('{count}').join(n);}
 function setTool(t){tool=t;if(t!=='select')sel.clear();render();}
 function pt(e){const r=svg.getBoundingClientRect();return{x:cl((e.clientX-r.left)/r.width,0,1),y:cl((e.clientY-r.top)/r.height,0,1)};}
 function groupIds(id){const s=get(id);return shapes.filter(o=>o.ordinal===s.ordinal).map(o=>o.id);}
@@ -356,59 +358,74 @@ render();
 })();</script>"""
 
 
+def plural_table(form):
+    """Plural forms for page JavaScript: {"forms": [...], "idx": "0111..."}; idx[k] picks the form
+    for k (k < 200; larger numbers use 100 + k % 100, which gives the same form in every language
+    here). `form(k)` returns the text for k with "{count}" left in for the number."""
+    forms, idx = [], []
+    for k in range(200):
+        s = form(k)
+        if s not in forms:
+            forms.append(s)
+        idx.append(str(forms.index(s)))
+    return {"forms": forms, "idx": "".join(idx)}
+
+
 def tool_bar(col):
     tr = col.tr
     def b(attr, label, text, key=""):
         tip = html.escape(label + (f" ({key})" if key else ""))
         return f'<button type="button" {attr} title="{tip}" aria-label="{html.escape(label)}">{text}</button>'
-    return (f'<div class="io-tools" role="toolbar" aria-label="Mask tools">'
-            + b('data-tool="select"', tr.editing_image_occlusion_select_tool(), "↖ Select", "S")
-            + b('data-tool="rect"', tr.editing_image_occlusion_rectangle_tool(), "▭ Rectangle", "R")
-            + b('data-tool="ellipse"', tr.editing_image_occlusion_ellipse_tool(), "◯ Ellipse", "E")
+    return (f'<div class="io-tools" role="toolbar" aria-label="{html.escape(t("Mask tools"))}">'
+            + b('data-tool="select"', tr.editing_image_occlusion_select_tool(), "↖ " + html.escape(t("Select")), "S")
+            + b('data-tool="rect"', tr.editing_image_occlusion_rectangle_tool(), "▭ " + html.escape(t("Rectangle")), "R")
+            + b('data-tool="ellipse"', tr.editing_image_occlusion_ellipse_tool(), "◯ " + html.escape(t("Ellipse")), "E")
             + '<span class="io-sep"></span>'
-            + b('data-act="undo"', "Undo", "↶", "Ctrl+Z") + b('data-act="redo"', "Redo", "↷", "Ctrl+Y")
+            + b('data-act="undo"', t("Undo"), "↶", "Ctrl+Z") + b('data-act="redo"', t("Redo"), "↷", "Ctrl+Y")
             + b('data-act="delete"', tr.editing_image_occlusion_delete(), "🗑", "Delete")
             + b('data-act="dup"', tr.editing_image_occlusion_duplicate(), "⧉", "Ctrl+D")
-            + b('data-act="group"', tr.editing_image_occlusion_group(), "Group", "Ctrl+G")
-            + b('data-act="ungroup"', tr.editing_image_occlusion_ungroup(), "Ungroup", "Ctrl+Shift+G")
-            + b('data-act="all"', tr.editing_image_occlusion_select_all(), "All", "Ctrl+A")
-            + b('data-act="multi" aria-pressed="false"', "Select several by tapping", "+ Multi")
+            + b('data-act="group"', tr.editing_image_occlusion_group(), html.escape(t("Group")), "Ctrl+G")
+            + b('data-act="ungroup"', tr.editing_image_occlusion_ungroup(), html.escape(t("Ungroup")), "Ctrl+Shift+G")
+            + b('data-act="all"', tr.editing_image_occlusion_select_all(), html.escape(t("All")), "Ctrl+A")
+            + b('data-act="multi" aria-pressed="false"', t("Select several by tapping"), "+ " + html.escape(t("Multi")))
             + b('data-act="see" aria-pressed="false"', tr.editing_image_occlusion_toggle_translucent(), "◐")
             + '<span class="muted" id="io-count" style="margin-left:auto;font-size:14px"></span></div>')
 
 
-def editor_html(col, conf, *, action, mode_all, header, back_extra, tags, top="", bottom="", save="Add"):
+def editor_html(col, conf, *, action, mode_all, header, back_extra, tags, top="", bottom="", save=None):
     tr = col.tr
+    save = t("Add") if save is None else save
     conf["msgs"] = {
-        "noImage": "Choose an image first.",
+        "noImage": t("Choose an image first."),
         "noOcclusion": tr.notetypes_no_occlusion_created(),
-        "notImage": "Please choose a picture (PNG, JPEG, GIF, WebP, SVG…).",
-        "badImage": "The image could not be shown.",
-        "replace": "Use the new image? The masks drawn so far will be removed.",
-        "noClipImage": "There is no image on the clipboard.",
-        "pasteKeys": "Press Ctrl+V (⌘V on iPad) to paste an image.",
-        "failed": "That did not work.",
-        "offline": "Could not reach the server. Check the connection and try again.",
+        "notImage": t("Please choose a picture (PNG, JPEG, GIF, WebP, SVG…)."),
+        "badImage": t("The image could not be shown."),
+        "replace": t("Use the new image? The masks drawn so far will be removed."),
+        "noClipImage": t("There is no image on the clipboard."),
+        "pasteKeys": t("Press Ctrl+V (⌘V on iPad) to paste an image."),
+        "failed": t("That did not work."),
+        "offline": t("Could not reach the server. Check the connection and try again."),
+        "cards": plural_table(lambda k: tn("{count} card", "{count} cards", k, count="{count}")),
     }
     mode_opts = (f'<option value="all" {"selected" if mode_all else ""}>{html.escape(tr.notetypes_hide_all_guess_one())}</option>'
                  f'<option value="one" {"" if mode_all else "selected"}>{html.escape(tr.notetypes_hide_one_guess_one())}</option>')
     return f"""{IO_CSS}<form id="io-form" method="post" action="{html.escape(action)}" enctype="multipart/form-data">
 {top}<div id="io-msg" role="alert"></div>
 <div id="io-editor" hidden>{tool_bar(col)}
-<div class="io-wrap" id="io-wrap"><div id="io-stage"><img id="io-img" alt="Image to occlude">
+<div class="io-wrap" id="io-wrap"><div id="io-stage"><img id="io-img" alt="{html.escape(t("Image to occlude"))}">
 <svg id="io-svg" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none" role="application"
-aria-label="Draw masks on the image"></svg></div></div>
-<p class="muted" style="font-size:14px;margin:8px 0 0">Draw a box or ellipse over each part to hide. Each number is one card;
-group shapes to hide them together on one card. Select to move; drag the corner square to resize.</p></div>
+aria-label="{html.escape(t("Draw masks on the image"))}"></svg></div></div>
+<p class="muted" style="font-size:14px;margin:8px 0 0">{html.escape(t("Draw a box or ellipse over each part to hide. Each number is one card;\n"
+                "group shapes to hide them together on one card. Select to move; drag the corner square to resize."))}</p></div>
 <label for="io-mode">{html.escape(tr.editing_image_occlusion_mode())}</label>
 <select id="io-mode" name="mode">{mode_opts}</select>
 <label for="io-header">{html.escape(tr.notetypes_header())}</label>
 <textarea id="io-header" name="header" style="min-height:60px">{html.escape(header)}</textarea>
 <label for="io-back">{html.escape(tr.notetypes_back_extra_field())}</label>
 <textarea id="io-back" name="back_extra" style="min-height:60px">{html.escape(back_extra)}</textarea>
-<label for="io-tags">Tags (space separated)</label><input id="io-tags" name="tags" value="{html.escape(tags)}" autocapitalize="off">
+<label for="io-tags">{html.escape(t("Tags (space separated)"))}</label><input id="io-tags" name="tags" value="{html.escape(tags)}" autocapitalize="off">
 <p class="row">{bottom}<button class="primary" id="io-save" title="{html.escape(save)} (Ctrl+Enter)">{html.escape(save)}</button></p>
-<noscript><p class="flash err">Drawing masks needs JavaScript.</p></noscript></form>
+<noscript><p class="flash err">{html.escape(t("Drawing masks needs JavaScript."))}</p></noscript></form>
 <script type="application/json" id="io-conf">{core.js(conf)}</script>{IO_JS}"""
 
 
@@ -429,20 +446,20 @@ def io_new_page(request: Request, nt: int = 0, did: int = 0):
         nt_opts = "".join(f'<option value="{m.id}" {"selected" if m.id == model["id"] else ""}>{html.escape(m.name)}</option>'
                           for m in io_types)
         tr = col.tr
-        top = f"""<div class="row"><div style="flex:1;min-width:180px"><label for="io-nt">Type</label>
+        top = f"""<div class="row"><div style="flex:1;min-width:180px"><label for="io-nt">{html.escape(t("Type"))}</label>
 <select id="io-nt" name="ntid">{nt_opts}</select></div>
-<div style="flex:1;min-width:180px"><label for="io-deck">Deck</label><select id="io-deck" name="did">{deck_opts}</select></div></div>
-<div class="io-pick" id="io-pick" style="margin-top:14px"><p style="margin-top:0">Choose a picture, drop one here, or paste it.</p>
+<div style="flex:1;min-width:180px"><label for="io-deck">{html.escape(t("Deck"))}</label><select id="io-deck" name="did">{deck_opts}</select></div></div>
+<div class="io-pick" id="io-pick" style="margin-top:14px"><p style="margin-top:0">{html.escape(t("Choose a picture, drop one here, or paste it."))}</p>
 <div class="row" style="justify-content:center"><label class="btn primary" style="margin:0;color:#fff;position:relative;overflow:hidden">{html.escape(tr.notetypes_io_select_image())}
 <input type="file" id="io-file" accept="image/*" style="position:absolute;width:1px;height:1px;opacity:0;padding:0;border:0"></label>
 <button type="button" id="io-paste">{html.escape(tr.notetypes_io_paste_image_from_clipboard())}</button></div>
 <p class="muted" id="io-pickname" style="margin-bottom:0;font-size:14px"></p></div>"""
         conf = {"adding": True, "shapes": [], "image": "", "legacy": False}
         form = editor_html(col, conf, action="/io/new", mode_all=True, header="", back_extra="", tags="", top=top,
-                           bottom='<a class="btn" href="/add">Other note types</a>', save="Add")
+                           bottom=f'<a class="btn" href="/add">{html.escape(t("Other note types"))}</a>', save=t("Add"))
         title = tr.notetypes_image_occlusion_name()
     body = f"""<div class="box"><div class="row" style="justify-content:space-between"><h2 style="margin:0">{html.escape(title)}</h2>
-<a class="btn" href="/notetypes/{model['id']}/cards">Cards…</a></div>{form}</div>"""
+<a class="btn" href="/notetypes/{model['id']}/cards">{html.escape(t("Cards…"))}</a></div>{form}</div>"""
     return core.page(title, body + '<span data-noundokey hidden></span>', user, "add", core.take_flash(request))
 
 
@@ -459,11 +476,11 @@ def reply(request, ok, msg, url):
 def parse_shapes(form):
     raw = str(form.get("shapes", "") or "")
     if len(raw) > 500_000:
-        raise ValueError("Too many masks.")
+        raise ValueError(t("Too many masks."))
     try:
         return json.loads(raw or "[]")
     except ValueError:
-        raise ValueError("The masks could not be read.")
+        raise ValueError(t("The masks could not be read."))
 
 
 def clean_tags(s):
@@ -483,19 +500,19 @@ async def io_add(request: Request):
     back = f"/io/new?nt={ntid}&did={did}" if ntid else "/io/new"
     up = form.get("image")
     if up is None or not hasattr(up, "read"):
-        return reply(request, False, "Choose an image first.", back)
+        return reply(request, False, t("Choose an image first."), back)
     data = await up.read()
     fname = os.path.basename((up.filename or "").replace("\\", "/")).strip()
     fname = re.sub(r'[\x00-\x1f"<>:/\\|?*\[\]]', "", fname)[:120] or "image.png"
     ext = os.path.splitext(fname)[1].lower()
     ctype = (up.content_type or "").split(";")[0].lower()
     if not data:
-        return reply(request, False, "The image file is empty.", back)
+        return reply(request, False, t("The image file is empty."), back)
     if len(data) > MAX_UPLOAD:
-        return reply(request, False, "The image is larger than 100 MB.", back)
+        return reply(request, False, t("The image is larger than 100 MB."), back)
     if ext not in IMAGE_EXTS:
         if not ctype.startswith("image/"):
-            return reply(request, False, "Please choose a picture (PNG, JPEG, GIF, WebP, SVG…).", back)
+            return reply(request, False, t("Please choose a picture (PNG, JPEG, GIF, WebP, SVG…)."), back)
         ext = "." + {"jpeg": "jpg", "svg+xml": "svg"}.get(ctype.split("/")[1], ctype.split("/")[1])
         fname += ext
     if form.get("pasted") == "1":   # named like Anki names pasted pictures
@@ -503,10 +520,10 @@ async def io_add(request: Request):
     with core.collection(user) as col:
         nt = col.models.get(ntid) if ntid else None
         if not is_io_notetype(col, nt):
-            return reply(request, False, "Choose an Image Occlusion note type.", "/io/new")
+            return reply(request, False, t("Choose an Image Occlusion note type."), "/io/new")
         deck = col.decks.get(did, default=False)
         if not deck or deck.get("dyn"):
-            return reply(request, False, "Choose a normal deck.", back)
+            return reply(request, False, t("Choose a normal deck."), back)
         try:
             occ = build_occlusions(parse_shapes(form), form.get("mode") != "one", renumber=True)
         except ValueError as e:
@@ -530,7 +547,7 @@ async def io_add(request: Request):
         ncards = len(set(re.findall(r"\{\{c(\d+)::image-occlusion:(?!text:)", occ)))
         col.models.set_current(nt)
         col.set_config("curDeck", did)
-    msg = f"Added {ncards} card{'s' if ncards != 1 else ''}." if added else "Nothing was added."
+    msg = tn("Added {n} card.", "Added {n} cards.", ncards) if added else t("Nothing was added.")
     return reply(request, bool(added), msg, f"/io/new?nt={nt['id']}&did={did}")
 
 
@@ -554,9 +571,9 @@ def io_edit_page(request: Request, nid: int, back: str = "/browse"):
             try:
                 col.get_note(nid)
             except Exception:
-                core.set_flash(request, "!That note no longer exists.")
+                core.set_flash(request, "!" + t("That note no longer exists."))
                 return RedirectResponse(back, 303)
-            core.set_flash(request, "!That is not an Image Occlusion note.")
+            core.set_flash(request, "!" + t("That is not an Image Occlusion note."))
             return RedirectResponse(f"/edit/{nid}?raw=1&back={qback}", 303)
         note = col.get_note(nid)
         shapes = note_shapes(n)
@@ -565,16 +582,17 @@ def io_edit_page(request: Request, nid: int, back: str = "/browse"):
         here = f"/io/{nid}?back={qback}"
         form = editor_html(col, conf, action=here, mode_all=n.occlude_inactive, header=n.header,
                            back_extra=n.back_extra, tags=" ".join(note.tags),
-                           bottom=f'<a class="btn" href="{html.escape(back)}">Cancel</a>', save="Save")
+                           bottom=f'<a class="btn" href="{html.escape(back)}">{html.escape(t("Cancel"))}</a>',
+                           save=t("Save"))
         cards_box = core.cards_panel(col, note, here)
         ntid = note.mid
         title = col.tr.notetypes_image_occlusion_name()
-    body = f"""<div class="box"><h2 style="margin-top:0">Edit {html.escape(title)}</h2>{form}
-<form method="post" action="/note/{nid}/delete?back={html.escape(qback)}" onsubmit="return confirm('Delete this note and its cards?')">
-<button class="danger">Delete note</button></form>
-<p class="row" style="margin-bottom:0"><a class="btn" href="/edit/{nid}?raw=1&amp;back={html.escape(qback)}">Edit fields as text</a>
-<a class="btn" href="/notetypes/{ntid}/cards?nid={nid}">Cards…</a></p></div>{cards_box}"""
-    return core.page("Edit", body + '<span data-noundokey hidden></span>', user, "browse", core.take_flash(request))
+    body = f"""<div class="box"><h2 style="margin-top:0">{html.escape(t("Edit {name}", name=title))}</h2>{form}
+<form method="post" action="/note/{nid}/delete?back={html.escape(qback)}" onsubmit="return confirm({html.escape(core.js(t('Delete this note and its cards?')))})">
+<button class="danger">{html.escape(t("Delete note"))}</button></form>
+<p class="row" style="margin-bottom:0"><a class="btn" href="/edit/{nid}?raw=1&amp;back={html.escape(qback)}">{html.escape(t("Edit fields as text"))}</a>
+<a class="btn" href="/notetypes/{ntid}/cards?nid={nid}">{html.escape(t("Cards…"))}</a></p></div>{cards_box}"""
+    return core.page(t("Edit"), body + '<span data-noundokey hidden></span>', user, "browse", core.take_flash(request))
 
 
 @router.post("/io/{nid}")
@@ -586,7 +604,7 @@ async def io_edit(request: Request, nid: int, back: str = "/browse"):
     form = await request.form()
     with core.collection(user) as col:
         if load_io_note(col, nid) is None:
-            return reply(request, False, "That Image Occlusion note no longer exists.", back)
+            return reply(request, False, t("That Image Occlusion note no longer exists."), back)
         try:
             occ = build_occlusions(parse_shapes(form), form.get("mode") != "one")
         except ValueError as e:
@@ -596,5 +614,5 @@ async def io_edit(request: Request, nid: int, back: str = "/browse"):
             col.update_image_occlusion_note(note_id=nid, occlusions=occ, header=str(form.get("header", "")),
                                             back_extra=str(form.get("back_extra", "")), tags=clean_tags(form.get("tags")))
         except Exception as e:
-            return reply(request, False, str(e) or "That did not work.", here)
-    return reply(request, True, "Saved.", back)
+            return reply(request, False, str(e) or t("That did not work."), here)
+    return reply(request, True, t("Saved."), back)

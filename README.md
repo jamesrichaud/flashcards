@@ -30,6 +30,7 @@ Everything runs on Anki's own engine, so cards, scheduling and files stay compat
 - Import .apkg (shared decks from AnkiWeb, with media), .colpkg (whole collection, after a confirm and a backup) and CSV/TSV/TXT with field mapping; export .colpkg, .apkg and plain text
 - Statistics with Anki's graphs (future due, calendar, reviews, card counts, intervals, ease or FSRS difficulty/stability/retrievability, hours, buttons, added, retention) for a deck or everything
 - Preferences: next day starts at, learn ahead, timebox, counts and next times on buttons, light/dark/system theme
+- Languages: English, Español, Français, Deutsch, Português, Italiano, Gaeilge, Polski; each person picks one in Preferences (default: the browser's language); Anki's own wording is used where Anki has it
 - Check database, check media, empty cards, daily backups (30 kept) with restore
 - Separate cards per person; all devices share the same cards; sync with AnkiDroid, AnkiMobile and desktop Anki through Anki's own sync server (or AnkiWeb)
 - Server-side add-ons (card render, after answer, extra pages); desktop Anki add-ons don't run here
