@@ -17,7 +17,7 @@ If an item fails twice, mark it `- [~]` with a one-line reason under it and move
 - [x] Rich editor for Add/Edit: bold/italic/underline, sub/superscript, colour, lists, clear formatting, cloze buttons (Ctrl+Shift+C new number, Ctrl+Shift+Alt+C same number), paste images, record/attach audio, MathJax (\( \) and \[ \]) rendering in cards, sticky fields, duplicate-first-field warning, preview button.
 - [x] Image occlusion: create from an uploaded image, draw rectangles (and ellipses) to hide, "hide all guess one" and "hide one guess one", using Anki's image occlusion note type so cards are compatible with real Anki. Edit masks later.
 - [x] Import: CSV/TSV/TXT (choose delimiter, note type, deck, field mapping, HTML on/off, duplicate handling, tags), .colpkg (whole collection, with a clear "this replaces everything" confirm), .apkg options (update existing notes / scheduling). Export: whole collection .colpkg, notes as text/CSV.
-- [ ] Media: check media (unused/missing files), delete unused, media served for audio/video/images in cards.
+- [x] Media: check media (unused/missing files), delete unused, media served for audio/video/images in cards.
 
 ## Stats and polish
 - [ ] Statistics page parity with Anki's graphs: future due, calendar heatmap, reviews (count and time), card counts pie, intervals, ease/difficulty, stability, retrievability, hourly breakdown, answer buttons, added, true retention table. Deck or whole-collection scope, time range 1 month / 3 months / 1 year / all. Use the engine's graphs/stats data.

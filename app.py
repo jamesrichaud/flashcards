@@ -4,7 +4,7 @@ Each user gets their own Anki collection file. Scheduling, cloze, import and
 export are all done by Anki's own Rust core, so behaviour matches Anki.
 Licence: AGPL-3.0 (because it builds on Anki).
 """
-import hashlib, html, json, os, re, secrets, tempfile, threading, time
+import hashlib, html, json, os, re, secrets, tempfile, threading, time, unicodedata
 from contextlib import contextmanager
 from urllib.parse import quote
 
@@ -784,16 +784,37 @@ def study_undo(request: Request, did: int):
             col.undo()
     return RedirectResponse(f"/study/{did}", 303)
 
+# Types for card media that Python's mimetypes table may not know on every system.
+MEDIA_TYPES = {".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".aac": "audio/aac", ".oga": "audio/ogg",
+               ".ogg": "audio/ogg", ".opus": "audio/ogg", ".weba": "audio/webm", ".wav": "audio/wav",
+               ".flac": "audio/flac", ".spx": "audio/ogg", ".amr": "audio/amr", ".3gp": "video/3gpp",
+               ".mp4": "video/mp4", ".m4v": "video/mp4", ".webm": "video/webm", ".ogv": "video/ogg",
+               ".mov": "video/quicktime", ".mkv": "video/x-matroska", ".avi": "video/x-msvideo",
+               ".mpg": "video/mpeg", ".mpeg": "video/mpeg", ".png": "image/png", ".jpg": "image/jpeg",
+               ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp", ".avif": "image/avif",
+               ".svg": "image/svg+xml", ".bmp": "image/bmp", ".ico": "image/x-icon", ".tif": "image/tiff",
+               ".tiff": "image/tiff", ".css": "text/css", ".js": "text/javascript", ".json": "application/json",
+               ".woff": "font/woff", ".woff2": "font/woff2", ".ttf": "font/ttf", ".otf": "font/otf"}
+MEDIA_SANDBOX = (".html", ".htm", ".xhtml", ".svg", ".xml", ".pdf")
+
 @app.get("/media/{name:path}")
 def media(request: Request, name: str):
     user = current_user(request)
     if not user: return Response(status_code=401)
     with collection(user) as col:
         folder = col.media.dir()
+    root = os.path.realpath(folder) + os.sep
     path = os.path.realpath(os.path.join(folder, name))
-    if not path.startswith(os.path.realpath(folder) + os.sep) or not os.path.isfile(path):
+    if not os.path.isfile(path):   # Anki stores names in NFC; a browser may send another form
+        path = os.path.realpath(os.path.join(folder, unicodedata.normalize("NFC", name)))
+    if not path.startswith(root) or not os.path.isfile(path):
         return Response(status_code=404)
-    return FileResponse(path)
+    ext = os.path.splitext(path)[1].lower()
+    headers = {"X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-cache"}
+    if ext in MEDIA_SANDBOX:   # page-like files from shared decks must not run scripts as this app
+        headers["Content-Security-Policy"] = "sandbox"
+    # FileResponse answers Range requests (206), which Safari needs to play audio and video.
+    return FileResponse(path, media_type=MEDIA_TYPES.get(ext), headers=headers)
 
 # ---------- add / edit (routes in flashcards/editor.py) ----------
 def cards_panel(col, note, back):
@@ -1234,6 +1255,9 @@ def settings(request: Request):
     users = load_users()
     body = f"""<div class="box row" style="justify-content:space-between"><h3 style="margin:0">Note types</h3>
 <a class="btn" href="/notetypes">Manage note types</a></div>
+<div class="box row" style="justify-content:space-between"><div><h3 style="margin:0">Media</h3>
+<span class="muted">Find missing and unused pictures and sounds.</span></div>
+<a class="btn" href="/check-media">Check media</a></div>
 <div class="box"><h3 style="margin-top:0">Scheduler</h3><form method="post" action="/settings/fsrs" class="row">
 <span style="flex:1">FSRS scheduling (Anki's modern algorithm) is <b>{'on' if fsrs else 'off'}</b>.</span>
 <button>{'Turn off (use SM-2)' if fsrs else 'Turn on'}</button></form></div>
@@ -1292,3 +1316,5 @@ from flashcards import image_occlusion  # noqa: E402
 app.include_router(image_occlusion.router)
 from flashcards import import_export  # noqa: E402
 app.include_router(import_export.router)
+from flashcards import media as media_check  # noqa: E402
+app.include_router(media_check.router)
