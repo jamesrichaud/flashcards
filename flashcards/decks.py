@@ -137,7 +137,11 @@ def desc_html(deck):
 def decks(request: Request):
     user = core.current_user(request)
     if not user: return core.need_login(request)
+    flash = core.take_flash(request)
     with core.collection(user) as col:
+        problem = core.sync_mod.auto_sync(user, col)   # only if turned on in Sync; '' or "!problem"
+        if problem:
+            flash = "!" + f"{flash.lstrip('!')} {problem.lstrip('!')}".strip()
         tree = col.sched.deck_due_tree()
         hide_default = col.card_count() and not col.find_cards(f"did:{DEFAULT_DECK_ID}")
         rows = []
@@ -173,8 +177,9 @@ def decks(request: Request):
 <button>Create deck</button></form>
 <div class="row" style="margin-top:10px"><a class="btn" href="/filtered/new">Create filtered deck</a>
 <a class="btn" href="/import">Import file</a>
-<a class="btn" href="{SHARED_DECKS_URL}" target="_blank" rel="noopener noreferrer">Get shared decks ↗</a></div></div>"""
-    return core.page("Decks", body, user, "decks", core.take_flash(request))
+<a class="btn" href="{SHARED_DECKS_URL}" target="_blank" rel="noopener noreferrer">Get shared decks ↗</a>
+<a class="btn" href="/sync">Sync</a></div></div>"""
+    return core.page("Decks", body, user, "decks", flash)
 
 
 @router.post("/deck/new")

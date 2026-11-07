@@ -7,3 +7,25 @@ services:
       - "8000:8000"
     volumes:
       - ./data:/data
+    # Address the Sync page offers by default (the optional sync service below).
+    environment:
+      - SYNC_SERVER_URL=http://flashcards-sync:8080/
+
+  # Optional: Anki's own sync server, so AnkiDroid / AnkiMobile / desktop Anki can sync too.
+  # Start it with:  docker compose --profile sync up -d --build
+  # Set one SYNC_USERn=name:password line per person (see README, "Sync with Anki apps").
+  flashcards-sync:
+    profiles: ["sync"]
+    build: .
+    container_name: flashcards-sync
+    restart: unless-stopped
+    command: ["python", "-m", "anki.syncserver"]
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data/syncserver:/syncserver
+    environment:
+      - SYNC_BASE=/syncserver
+      - SYNC_HOST=0.0.0.0
+      - SYNC_PORT=8080
+      - SYNC_USER1=${SYNC_USER1:-}

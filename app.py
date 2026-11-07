@@ -151,7 +151,7 @@ def page(title, body, user=None, active="", flash=""):
 <meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Flashcards"><link rel="manifest" href="/manifest.json">
 <title>{html.escape(title)}</title><style>{CSS}</style></head><body>
-<header><b>Flashcards</b>{nav}</header><main>{fl}{body}</main>{undo_mod.SCRIPT if user else ""}</body></html>""")
+<header><b>Flashcards</b>{nav}</header><main>{fl}{body}</main>{undo_mod.SCRIPT + sync_mod.live_script(user) if user else ""}</body></html>""")
 
 def take_flash(request):
     return request.session.pop("flash", "")
@@ -387,7 +387,7 @@ async def card_action_route(request: Request, cid: int):
         except Exception as e:
             msg, good, info = str(e) or "That did not work.", False, {}
     if ajax:
-        return {"ok": good, "msg": msg, **info}
+        return {"ok": good, "msg": msg, "stamp": sync_mod.stamp(user), **info}
     set_flash(request, msg if good else "!" + msg)
     return RedirectResponse(back, 303)
 
@@ -677,7 +677,7 @@ async function act(a,arg){{document.querySelector('.more').open=false;
  const fd=new FormData();fd.append('action',a);fd.append('arg',arg??'');
  const r=await(await fetch('/card/{card.id}/action',{{method:'POST',body:fd,headers:{{'X-Requested-With':'fetch'}}}})).json();
  toast(r.msg);if(!r.ok)return;
- if(['flag','mark'].includes(a)){{const f=document.getElementById('flag');f.style.display=r.flag?'':'none';
+ if(['flag','mark'].includes(a)){{if(r.stamp&&window.fcStampSeen)fcStampSeen(r.stamp);const f=document.getElementById('flag');f.style.display=r.flag?'':'none';
   f.style.background=FC[r.flag];document.getElementById('mark').style.display=r.marked?'':'none';}}
  else setTimeout(()=>location.replace('/study/{did}'),500);}}
 function setDue(){{const d=prompt('Show this card in how many days? (0 = today, 3-7 = random range, add ! to also set the interval)','1');
@@ -1191,7 +1191,10 @@ def settings(request: Request):
     with collection(user) as col:
         fsrs = col.get_config("fsrs", True)
     users = load_users()
-    body = f"""<div class="box row" style="justify-content:space-between"><div><h3 style="margin:0">Preferences</h3>
+    body = f"""<div class="box row" style="justify-content:space-between"><div><h3 style="margin:0">Sync</h3>
+<span class="muted">Your devices always share the same cards. Sync with AnkiDroid, AnkiMobile or desktop Anki.</span></div>
+<a class="btn" href="/sync">Sync</a></div>
+<div class="box row" style="justify-content:space-between"><div><h3 style="margin:0">Preferences</h3>
 <span class="muted">Next day starts at, learn ahead, timebox, review screen, theme.</span></div>
 <a class="btn" href="/preferences">Preferences</a></div>
 <div class="box row" style="justify-content:space-between"><h3 style="margin:0">Note types</h3>
@@ -1278,3 +1281,5 @@ from flashcards import preferences as preferences_page  # noqa: E402
 app.include_router(preferences_page.router)
 from flashcards import maintenance  # noqa: E402  (collection() uses it for the daily backup)
 app.include_router(maintenance.router)
+from flashcards import sync as sync_mod  # noqa: E402  (page() adds its live-refresh script)
+app.include_router(sync_mod.router)
