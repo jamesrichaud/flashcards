@@ -132,7 +132,8 @@ def body_script():
     study = html.escape(t("Study offline"), False)   # the offline study page (flashcards/offline.py)
     return f"""<div id="fc-offline" role="status" hidden>{banner} <a href="/offline/study">{study}</a></div>
 <script>(function(){{const b=document.getElementById('fc-offline');
-function upd(){{b.hidden=navigator.onLine!==false;}}window.addEventListener('online',upd);window.addEventListener('offline',upd);upd();
+function upd(){{b.hidden=navigator.onLine!==false;
+document.documentElement.style.setProperty('--fc-offbar',b.hidden?'0px':b.offsetHeight+'px');}}window.addEventListener('resize',upd);window.addEventListener('online',upd);window.addEventListener('offline',upd);upd();
 if('serviceWorker' in navigator&&window.isSecureContext)navigator.serviceWorker.register('/sw.js').catch(()=>{{}});}})();</script>"""
 
 
@@ -158,6 +159,7 @@ html:has([data-noundokey]){overscroll-behavior:none}
 #fc-offline{position:fixed;left:0;right:0;bottom:0;z-index:40;background:#8a1f1f;color:#fff;text-align:center;
 padding:10px 16px calc(10px + env(safe-area-inset-bottom));font-size:15px}
 #fc-offline a{color:#fff;font-weight:600;text-decoration:underline;display:inline-flex;align-items:center;min-height:44px;margin:-12px 0}
+body main .bar{bottom:var(--fc-offbar,0px)}body>main{margin-bottom:var(--fc-offbar,0px)}
 #fc-toast{top:calc(70px + env(safe-area-inset-top))}
 """
 

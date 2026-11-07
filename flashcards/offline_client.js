@@ -620,7 +620,7 @@ function showNote() {
   const main = document.querySelector('main'); if (!main || document.getElementById('fc-synced')) return;
   const box = document.createElement('div');
   box.id = 'fc-synced'; box.setAttribute('role', 'status');
-  box.className = 'flash' + (n.warn ? ' fc-off-warn' : '');
+  box.className = 'flash' + (n.warn ? ' err' : '');   // .err: the app's red message box, on every page
   box.style.display = 'flex'; box.style.gap = '10px'; box.style.alignItems = 'center';
   const tx = document.createElement('span'); tx.textContent = n.msg; tx.style.flex = '1';
   const x = document.createElement('button'); x.type = 'button'; x.textContent = '×'; x.setAttribute('aria-label', 'OK');

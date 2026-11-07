@@ -623,8 +623,8 @@ def study_page(request):
                  "dark:()=>{const c=document.documentElement.classList;return c.contains('dark')||"
                  "(!c.contains('light')&&matchMedia('(prefers-color-scheme:dark)').matches);},"
                  "save:()=>{}});</script>")
-    body = f"""<header><b>Flashcards</b><a href="/" id="fco-home">{e(t("Decks"))}</a><a href="/add" id="fco-add-link" data-nav="/add">{e(t("Add"))}</a></header>
-<div id="fco-banner" role="status" hidden></div>
+    body = f"""<div id="fco-top"><header><b>Flashcards</b><a href="/" id="fco-home">{e(t("Decks"))}</a><a href="/add" id="fco-add-link" data-nav="/add">{e(t("Add"))}</a></header>
+<div id="fco-banner" role="status" hidden></div></div>
 <main>
 <div id="fco-flash" class="flash" hidden></div>
 <section id="fco-list" hidden>
@@ -679,8 +679,8 @@ def study_page(request):
 {STUDY_PAGE_CSS}</style></head><body>{body}</body></html>"""
 
 
-STUDY_PAGE_CSS = """#fco-banner{background:#8a5a00;color:#fff;text-align:center;padding:8px 16px;font-size:15px;
-position:sticky;top:0;z-index:6}#fco-decks a{min-height:44px;display:flex;align-items:center}
+STUDY_PAGE_CSS = """#fco-top{position:sticky;top:0;z-index:6}#fco-top header{position:static}
+#fco-banner{background:#8a5a00;color:#fff;text-align:center;padding:8px 16px;font-size:15px}#fco-decks a{min-height:44px;display:flex;align-items:center}
 #fco-decks td{padding:4px 8px}#fco-approx{font-size:13px;text-align:center;margin:6px 0 0}
 .counts span:empty{display:none}
 .fco-flabel{display:block;font-weight:600;margin:12px 0 4px}#fco-fields textarea,#fco-tags{width:100%;font:inherit;

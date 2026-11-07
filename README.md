@@ -34,7 +34,43 @@ Everything runs on Anki's own engine, so cards, scheduling and files stay compat
 - Check database, check media, empty cards, daily backups (30 kept) with restore
 - Separate cards per person; all devices share the same cards; sync with AnkiDroid, AnkiMobile and desktop Anki through Anki's own sync server (or AnkiWeb)
 - Server-side add-ons (card render, after answer, extra pages); desktop Anki add-ons don't run here
-- Works on iPad and Chromebook: Add to Home Screen / install, 44px touch targets, safe areas, dark mode, offline page
+- Works on iPad and Chromebook: Add to Home Screen / install, 44px touch targets, safe areas, dark mode, study offline (see below)
+
+## Studying offline
+Like Anki on an iPad or Chromebook with no signal: switch on **Make available offline** on a deck's
+overview page (or **Make all decks available offline** in Preferences). While the app is open with a
+connection, each device keeps a copy of today's cards for those decks, plus up to 3 days ahead
+(Preferences > Offline > Cards to keep), with their pictures and sounds. The overview shows
+"Offline ready · updated 2 minutes ago · 54 cards, 12 MB".
+
+**Works with no connection** (open the app as usual; it switches to the offline study page by itself):
+- studying the offline decks with the normal study screen: Again/Hard/Good/Easy, Again and learning
+  cards coming back after their step, undo, type-in answers, audio and replay, MathJax, image
+  occlusion, whiteboard, tap-to-answer and add-ons' card features
+- adding notes (text only, any standard or cloze note type)
+- an "Offline · N answers waiting to sync" banner
+
+Button times for the first answer of a card are the engine's own; times for cards answered again
+in the same offline session, or cards from later days, are worked out on the device and shown with "~".
+
+**Needs a connection:** Browse, editing, flags, mark, bury, suspend, card info, deck options, stats,
+import/export, sync with Anki apps, and every other page.
+
+**When the connection comes back** the answers are sent to the server and replayed, in the order and
+at the times they were given, through Anki's real scheduler, so statistics and intervals come out as
+if studied online. Each answer is sent exactly once, even if the connection drops mid-send. If a card
+was changed or answered on another device in the meantime, its offline answers are skipped and the
+app says how many ("2 answers were skipped because the cards changed on another device").
+
+**iPad notes**
+- Offline copies need the HTTPS link (or localhost); on a plain http:// address they are not made.
+- Add the app to the Home Screen and open it from there: Safari keeps a Home Screen app's data much
+  more reliably than a Safari tab (Safari may delete a site's data after 7 days without a visit).
+- Safari gives web apps limited space. Keep Preferences > Offline > Media limit low (50–250 MB);
+  pictures and sounds beyond it are not kept, and the overview warns when the limit is reached.
+  Preferences shows how much this device is using and whether the browser agreed to keep it.
+- Open the app with a connection now and then (at least once a day you plan to study offline) so
+  the copy is up to date; the copy only covers the days it was downloaded for.
 
 ## Run it on the home server
 ```
@@ -150,6 +186,7 @@ python3 tests/test_engine.py     # Anki engine: decks, cloze, import/export, FSR
 python3 tests/test_app.py        # whole app, end to end, acting as a user
 python3 tests/test_regression.py # visits every page the app links to and checks each one
 python3 tests/shots_all.py       # screenshots of every page at iPad and Chromebook sizes (needs Playwright + Chromium)
+python3 tests/run_shots.py       # every tests/shots_*.py script (offline study and sync tests included)
 ```
 
 ## Licence
