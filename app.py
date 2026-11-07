@@ -104,6 +104,10 @@ color:var(--ink);cursor:pointer;text-decoration:none;display:inline-block;min-he
 .danger{color:var(--again)}.muted{color:var(--muted)}.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
 .flash{padding:12px 16px;border-radius:10px;background:#e7f4ea;color:#1d5e30;margin-bottom:16px}
 .err{background:#fbe9e9;color:#8a1f1f}
+form.fc-ur{margin:0}form.fc-ur button{min-width:44px;padding:8px 10px;font-size:20px;line-height:1;border-color:transparent;background:none}
+form.fc-ur button:hover{background:var(--bg)}
+#fc-toast{position:fixed;left:50%;top:70px;transform:translateX(-50%);background:var(--ink);color:var(--bg);max-width:90vw;
+padding:10px 18px;border-radius:10px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:30}#fc-toast.on{opacity:1}
 """
 
 def page(title, body, user=None, active="", flash=""):
@@ -112,7 +116,7 @@ def page(title, body, user=None, active="", flash=""):
         items = [("decks", "/", "Decks"), ("add", "/add", "Add"), ("browse", "/browse", "Browse"),
                  ("import", "/import", "Import"), ("stats", "/stats", "Stats"), ("settings", "/settings", "Settings")]
         nav = "".join(f'<a href="{u}" class="{"on" if k == active else ""}">{t}</a>' for k, u, t in items)
-        nav += '<a href="/logout" class="muted">Log out</a>'
+        nav += undo_mod.header_buttons(user) + '<a href="/logout" class="muted">Log out</a>'
     fl = ""
     if flash:
         cls = "flash err" if flash.startswith("!") else "flash"
@@ -122,7 +126,7 @@ def page(title, body, user=None, active="", flash=""):
 <meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Flashcards"><link rel="manifest" href="/manifest.json">
 <title>{html.escape(title)}</title><style>{CSS}</style></head><body>
-<header><b>Flashcards</b>{nav}</header><main>{fl}{body}</main></body></html>""")
+<header><b>Flashcards</b>{nav}</header><main>{fl}{body}</main>{undo_mod.SCRIPT if user else ""}</body></html>""")
 
 def take_flash(request):
     return request.session.pop("flash", "")
@@ -571,6 +575,7 @@ const AV={js(av)},HAS_TYPE={js(has_type)},SLOT={js(TYPE_SLOT)};let typed={js(typ
 function fit(){{try{{const h=fr.contentDocument.documentElement.scrollHeight;fr.style.height=Math.max(h+10,window.innerHeight*.55)+'px'}}catch(e){{}}}}
 function load(d){{fr.srcdoc=d;}} fr.addEventListener('fc-resize',fit);fr.onload=()=>{{fit();setTimeout(fit,300);
  fr.contentDocument.addEventListener('keydown',key);
+ fr.contentDocument.addEventListener('keydown',e=>window.fcUndoKey&&window.fcUndoKey(e));
  const ti=fr.contentDocument.getElementById('typeans');if(ti&&ti.tagName==='INPUT'){{ti.value=typed;ti.focus();}}}};
 // ---- audio: a small queue player, like Anki's (sound files and TTS) ----
 let playing=[],cur=null;
@@ -628,6 +633,7 @@ function key(e){{const tg=e.target.tagName;
 document.addEventListener('keydown',key);
 if({js(start_shown)})show();else{{load(Q);if(AV.autoplay&&!quiet)playList(AV.q);quiet=false;}}
 const FL={js(flash.lstrip('!'))};if(FL)toast(FL);
+window.FC_AFTER_UNDO='/study/{did}';
 </script>"""
     return page("Study", body, user, "decks")
 
@@ -1183,3 +1189,5 @@ from flashcards import media as media_check  # noqa: E402
 app.include_router(media_check.router)
 from flashcards import stats as stats_page  # noqa: E402
 app.include_router(stats_page.router)
+from flashcards import undo as undo_mod  # noqa: E402  (page() uses it for the header buttons)
+app.include_router(undo_mod.router)

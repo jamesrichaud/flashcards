@@ -443,7 +443,7 @@ def io_new_page(request: Request, nt: int = 0, did: int = 0):
         title = tr.notetypes_image_occlusion_name()
     body = f"""<div class="box"><div class="row" style="justify-content:space-between"><h2 style="margin:0">{html.escape(title)}</h2>
 <a class="btn" href="/notetypes/{model['id']}/cards">Cards…</a></div>{form}</div>"""
-    return core.page(title, body, user, "add", core.take_flash(request))
+    return core.page(title, body + '<span data-noundokey hidden></span>', user, "add", core.take_flash(request))
 
 
 def reply(request, ok, msg, url):
@@ -574,7 +574,7 @@ def io_edit_page(request: Request, nid: int, back: str = "/browse"):
 <button class="danger">Delete note</button></form>
 <p class="row" style="margin-bottom:0"><a class="btn" href="/edit/{nid}?raw=1&amp;back={html.escape(qback)}">Edit fields as text</a>
 <a class="btn" href="/notetypes/{ntid}/cards?nid={nid}">Cards…</a></p></div>{cards_box}"""
-    return core.page("Edit", body, user, "browse", core.take_flash(request))
+    return core.page("Edit", body + '<span data-noundokey hidden></span>', user, "browse", core.take_flash(request))
 
 
 @router.post("/io/{nid}")

@@ -407,7 +407,7 @@ def add_page(request: Request, nt: int = 0, did: int = 0):
         body = (f'<div class="box"><div class="row" style="justify-content:space-between"><h2 style="margin:0">Add card</h2>'
                 f'<div class="row"><a class="btn" href="/io/new?did={did}">Image Occlusion</a>'
                 f'<a class="btn" href="/notetypes/{model["id"]}/cards">Cards…</a></div></div>{form}</div>')
-    return core.page("Add", body, user, "add", core.take_flash(request))
+    return core.page("Add", body + '<span data-noundokey hidden></span>', user, "add", core.take_flash(request))
 
 
 async def save_upload(col, upload):
@@ -490,7 +490,7 @@ def edit_page(request: Request, nid: int, back: str = "/browse", raw: int = 0):
 <p class="row" style="margin-bottom:0"><a class="btn" href="/notetypes/{model['id']}/cards?nid={nid}">Cards…</a>
 <a class="btn" href="/notetypes/{model['id']}/fields">Fields…</a>
 <a class="btn" href="/notetypes/change?nids={nid}&amp;back={html.escape(qback)}">Change note type</a></p></div>{cards_box}"""
-    return core.page("Edit", body, user, "browse", core.take_flash(request))
+    return core.page("Edit", body + '<span data-noundokey hidden></span>', user, "browse", core.take_flash(request))
 
 
 @router.post("/edit/{nid}")
