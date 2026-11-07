@@ -220,6 +220,7 @@ def move_targets(col, did):
 def deck_overview(request: Request, did: int):
     user = core.current_user(request)
     if not user: return core.need_login(request)
+    request.session.pop("timebox", None)   # like Anki, the overview starts a new timebox
     with core.collection(user) as col:
         deck = col.decks.get(did, default=False)
         if not deck: return RedirectResponse("/", 303)

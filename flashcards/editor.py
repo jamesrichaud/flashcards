@@ -567,7 +567,7 @@ def preview_doc(col, card, text):
     text = core.render_side(col, card, text)
     text = core.TYPE_PAT.sub(lambda m: '<center><input type="text" id="typeans" placeholder="(typing the answer)" '
                                        'disabled></center>', text)
-    return core.card_doc(text)
+    return core.card_doc(text, core.theme_of(col))
 
 
 @router.post("/note/preview")

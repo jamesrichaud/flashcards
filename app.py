@@ -82,7 +82,9 @@ def need_login(request):
 CSS = """
 :root{--bg:#f6f6f4;--card:#fff;--ink:#1d1d1f;--muted:#6e6e73;--line:#e3e3e0;--accent:#2f6fde;
 --again:#d64545;--hard:#c98a16;--good:#2e9b4f;--easy:#2f6fde}
-@media (prefers-color-scheme:dark){:root{--bg:#161617;--card:#232325;--ink:#f2f2f2;--muted:#a1a1a6;--line:#38383b}}
+:root{color-scheme:light dark}:root.light{color-scheme:light}:root.dark{color-scheme:dark}
+@media (prefers-color-scheme:dark){:root:not(.light){--bg:#161617;--card:#232325;--ink:#f2f2f2;--muted:#a1a1a6;--line:#38383b}}
+:root.dark{--bg:#161617;--card:#232325;--ink:#f2f2f2;--muted:#a1a1a6;--line:#38383b}
 *{box-sizing:border-box}body{margin:0;font:17px/1.45 -apple-system,system-ui,Segoe UI,Roboto,sans-serif;
 background:var(--bg);color:var(--ink);-webkit-text-size-adjust:100%}
 header{display:flex;gap:6px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--line);
@@ -110,6 +112,26 @@ form.fc-ur button:hover{background:var(--bg)}
 padding:10px 18px;border-radius:10px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:30}#fc-toast.on{opacity:1}
 """
 
+# Theme (Anki's Preferences > Appearance > Theme). Kept in the collection's config so it
+# follows the user to every device. "system" follows the device's light/dark setting.
+THEMES = ("system", "light", "dark")
+THEME_KEY = "flashcardsTheme"
+
+def theme_of(col):
+    t = col.get_config(THEME_KEY, "system")
+    return t if t in THEMES else "system"
+
+def user_theme(user):
+    """Theme for page(). Read without the per-user lock, like the undo status (page() is
+    often called while the request holds it; config reads are read-only engine calls)."""
+    col = _cols.get(user) if user else None
+    if col is None:
+        return "system"
+    try:
+        return theme_of(col)
+    except Exception:
+        return "system"
+
 def page(title, body, user=None, active="", flash=""):
     nav = ""
     if user:
@@ -121,7 +143,9 @@ def page(title, body, user=None, active="", flash=""):
     if flash:
         cls = "flash err" if flash.startswith("!") else "flash"
         fl = f'<div class="{cls}">{html.escape(flash.lstrip("!"))}</div>'
-    return HTMLResponse(f"""<!doctype html><html><head><meta charset="utf-8">
+    theme = user_theme(user)
+    root = f' class="{theme}"' if theme in ("light", "dark") else ""
+    return HTMLResponse(f"""<!doctype html><html{root}><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Flashcards"><link rel="manifest" href="/manifest.json">
@@ -262,11 +286,25 @@ return MathJax.startup.defaultPageReady().then(function(){try{window.frameElemen
 window.frameElement.dispatchEvent(new Event("fc-resize"))}catch(e){}})}}};</script>
 <script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg-full.js"></script>"""
 
-def card_doc(inner, night=False):
+CARD_DARK_CSS = """body{background:#232325;color:#f2f2f2}.card{background:transparent!important;color:#f2f2f2!important}
+input#typeans{background:#161617;color:#f2f2f2;border-color:#555}.replay-button circle{fill:#333;stroke:#777}
+.replay-button path{fill:#ddd}"""
+# Like Anki, cards in dark mode get the night_mode / nightMode classes so card CSS can style them.
+NIGHT_JS = """<script>if(matchMedia('(prefers-color-scheme:dark)').matches){
+document.documentElement.classList.add('night_mode');document.documentElement.classList.add('nightMode');}</script>"""
+
+def card_doc(inner, theme="system"):
+    """A card side as a full page for the study/preview iframe. theme: system, light or dark."""
     mj = MATHJAX if MATHJAX_PAT.search(inner) else ""
     if "anki.imageOcclusion" in inner:   # Image Occlusion cards: draw the masks (flashcards/io_review.py)
         mj += IO_REVIEW_JS
-    return f"""<!doctype html><html class="{'night_mode' if night else ''}"><head><meta charset="utf-8">
+    if theme == "dark":
+        dark, cls, head = CARD_DARK_CSS, "night_mode nightMode", '<meta name="color-scheme" content="dark">'
+    elif theme == "light":
+        dark, cls, head = "", "", '<meta name="color-scheme" content="light">'
+    else:
+        dark, cls, head = "@media (prefers-color-scheme:dark){" + CARD_DARK_CSS + "}", "", NIGHT_JS
+    return f"""<!doctype html><html class="{cls}"><head><meta charset="utf-8">{head}
 <meta name="viewport" content="width=device-width,initial-scale=1"><base href="/media/">
 <style>html,body{{margin:0;padding:0}}body{{padding:20px;font-family:-apple-system,system-ui,sans-serif}}
 img{{max-width:100%;height:auto}}.cloze{{font-weight:bold;color:#2f6fde}}
@@ -275,9 +313,7 @@ img{{max-width:100%;height:auto}}.cloze{{font-weight:bold;color:#2f6fde}}
 code#typeans{{display:inline-block;width:auto;border:0;padding:0;font-family:inherit}}
 .typeGood{{background-color:#afa;color:black}}.typeBad{{background-color:#faa;color:black}}
 .typeMissed{{background-color:#ccc;color:black}}
-@media (prefers-color-scheme:dark){{body{{background:#232325;color:#f2f2f2}}.card{{background:transparent!important;color:#f2f2f2!important}}
-input#typeans{{background:#161617;color:#f2f2f2;border-color:#555}}.replay-button circle{{fill:#333;stroke:#777}}
-.replay-button path{{fill:#ddd}}}}
+{dark}
 </style>{mj}</head><body class="card">{inner}</body></html>"""
 
 # ---------- card actions (suspend, bury, flag, mark, reset, set due date) ----------
@@ -480,6 +516,33 @@ def study_waiting(request, user, did, secs, undo_label, flash):
 <script>setTimeout(()=>location.replace('/study/{did}'),{(int(secs) + 1) * 1000});</script>"""
     return page("Study", body, user, "decks", flash)
 
+# Timebox (Preferences > Timebox time limit), like Anki's collection.startTimebox/timeboxReached,
+# but kept per browser session: one collection is shared by all of a user's devices.
+def timebox_clock():
+    return time.time()
+
+def timebox_start(request, did, force=False):
+    tb = request.session.get("timebox")
+    if force or not isinstance(tb, dict) or tb.get("did") != did:
+        request.session["timebox"] = {"did": did, "start": timebox_clock(), "n": 0}
+
+def timebox_answered(request, col, did):
+    """Count an answer; once the limit has passed, return Anki's message and start again."""
+    tb = request.session.get("timebox")
+    if not isinstance(tb, dict) or tb.get("did") != did:
+        timebox_start(request, did, True)
+        tb = request.session["timebox"]
+    tb = dict(tb, n=int(tb.get("n", 0)) + 1)
+    request.session["timebox"] = tb
+    limit = col.get_preferences().reviewing.time_limit_secs
+    elapsed = timebox_clock() - float(tb.get("start", 0))
+    if not limit or elapsed < limit:
+        return ""
+    timebox_start(request, did, True)
+    mins = max(1, round(elapsed / 60))
+    msg = f"{col.tr.studying_card_studied_in(count=tb['n'])} {col.tr.studying_minute(count=mins)}"
+    return re.sub(r"[⁨⁩]", "", msg)
+
 @app.get("/study/{did}", response_class=HTMLResponse)
 def study(request: Request, did: int, cid: int = 0, shown: int = 0, ms: int = 0, typed: str = ""):
     user = current_user(request)
@@ -510,15 +573,19 @@ def study(request: Request, did: int, cid: int = 0, shown: int = 0, ms: int = 0,
         conf = col.decks.config_dict_for_deck_id(card.current_deck_id())
         av = {"q": av_list(card.question_av_tags()), "a": av_list(card.answer_av_tags()),
               "autoplay": bool(conf.get("autoplay", True)), "replayq": bool(conf.get("replayq", True))}
+        rprefs = col.get_preferences().reviewing
+        show_counts, show_times = rprefs.show_remaining_due_counts, rprefs.show_intervals_on_buttons
+        theme = theme_of(col)
+    timebox_start(request, did)
     # Coming back from Edit or Card info: same card, same side, timer carries on.
     resume = cid == card.id
     start_shown = resume and bool(shown)
     elapsed = max(0, min(ms, 3_600_000)) if resume else 0
-    qdoc, adoc = js(card_doc(question)), js(card_doc(answer))
+    qdoc, adoc = js(card_doc(question, theme)), js(card_doc(answer, theme))
     names = ["Again", "Hard", "Good", "Easy"]
     colors = ["again", "hard", "good", "easy"]
     btns = "".join(f"""<button class="ans" style="border-color:var(--{c});color:var(--{c})"
-onclick="answer({i + 1})"><small>{html.escape(labels[i])}</small><br>{n}</button>"""
+onclick="answer({i + 1})">{f'<small>{html.escape(labels[i])}</small><br>' if show_times else ''}{n}</button>"""
                    for i, (n, c) in enumerate(zip(names, colors)))
     undo = f'<form method="post" action="/study/{did}/undo"><button>Undo {html.escape(undo_label)}</button></form>' \
         if undo_label else ""
@@ -558,9 +625,9 @@ padding:10px 18px;border-radius:10px;opacity:0;transition:opacity .2s;pointer-ev
 <div class="counts"><span id="flag" class="dot" title="{FLAG_NAME[flag]} flag"
 style="background:{FLAG_COLOR[flag]};{'' if flag else 'display:none'}"></span>
 <span id="mark" title="Marked" style="{'' if marked else 'display:none'}">★</span>
-<span class="new {'cur' if kind == 'new' else ''}">{counts[0]}</span>
+{f'''<span class="new {'cur' if kind == 'new' else ''}">{counts[0]}</span>
 <span class="lrn {'cur' if kind == 'lrn' else ''}">{counts[1]}</span>
-<span class="rev {'cur' if kind == 'rev' else ''}">{counts[2]}</span></div>
+<span class="rev {'cur' if kind == 'rev' else ''}">{counts[2]}</span>''' if show_counts else ''}</div>
 <div class="row">{undo}{replay_btn}<a class="btn" href="/edit/{card.nid}?back=/study/{did}"
 onclick="edit();return false;">Edit</a>{menu}</div></div>
 <div id="toast"></div>
@@ -667,12 +734,15 @@ def study_answer(request: Request, did: int, card_id: int = Form(...), rating: i
             ans = col.sched.build_answer(card=card, states=q.cards[0].states, rating=ratings[rating])
             leech = col.sched.state_is_leech(ans.new_state)
             col.sched.answer_card(ans)
+            msgs = []
             if leech:   # same notice as Anki's reviewer
                 card.load()
-                msg = "Card was a leech."
-                if card.queue < 0:
-                    msg += " It has been suspended."
-                set_flash(request, msg)
+                msgs.append("Card was a leech." + (" It has been suspended." if card.queue < 0 else ""))
+            tb = timebox_answered(request, col, did)
+            if tb:
+                msgs.append(tb)
+            if msgs:
+                set_flash(request, " ".join(msgs))
     return RedirectResponse(f"/study/{did}", 303)
 
 @app.post("/study/{did}/undo")
@@ -1120,7 +1190,10 @@ def settings(request: Request):
     with collection(user) as col:
         fsrs = col.get_config("fsrs", True)
     users = load_users()
-    body = f"""<div class="box row" style="justify-content:space-between"><h3 style="margin:0">Note types</h3>
+    body = f"""<div class="box row" style="justify-content:space-between"><div><h3 style="margin:0">Preferences</h3>
+<span class="muted">Next day starts at, learn ahead, timebox, review screen, theme.</span></div>
+<a class="btn" href="/preferences">Preferences</a></div>
+<div class="box row" style="justify-content:space-between"><h3 style="margin:0">Note types</h3>
 <a class="btn" href="/notetypes">Manage note types</a></div>
 <div class="box row" style="justify-content:space-between"><div><h3 style="margin:0">Media</h3>
 <span class="muted">Find missing and unused pictures and sounds.</span></div>
@@ -1191,3 +1264,5 @@ from flashcards import stats as stats_page  # noqa: E402
 app.include_router(stats_page.router)
 from flashcards import undo as undo_mod  # noqa: E402  (page() uses it for the header buttons)
 app.include_router(undo_mod.router)
+from flashcards import preferences as preferences_page  # noqa: E402
+app.include_router(preferences_page.router)

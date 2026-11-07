@@ -343,7 +343,7 @@ def preview_docs(col, nt, ord_, qfmt, afmt, css, nid=0, cloze=1):
         text = re.sub(r"\[anki:play:[qa]:\d+\]", play, text)
         box = '<center><input type="text" id="typeans" placeholder="(typing the answer)" disabled></center>'
         text = core.TYPE_PAT.sub(box if front else "", text)
-        return core.card_doc(f"<style>{css}</style>{text}")
+        return core.card_doc(f"<style>{css}</style>{text}", core.theme_of(col))
     return side(out.question_text, True), side(out.answer_text, False)
 
 
