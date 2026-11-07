@@ -21,7 +21,7 @@ If an item fails twice, mark it `- [~]` with a one-line reason under it and move
 
 ## Stats and polish
 - [x] Statistics page parity with Anki's graphs: future due, calendar heatmap, reviews (count and time), card counts pie, intervals, ease/difficulty, stability, retrievability, hourly breakdown, answer buttons, added, true retention table. Deck or whole-collection scope, time range 1 month / 3 months / 1 year / all. Use the engine's graphs/stats data.
-- [ ] Deck list parity: collapse/expand subdecks, drag-free "move deck" control, deck description shown on overview (editable, markdown off), daily "today: studied N cards in M minutes" line under the deck list, shared decks link to ankiweb.net/shared.
+- [x] Deck list parity: collapse/expand subdecks, drag-free "move deck" control, deck description shown on overview (editable, markdown off), daily "today: studied N cards in M minutes" line under the deck list, shared decks link to ankiweb.net/shared.
 - [ ] Undo/redo everywhere via the engine (Ctrl+Z), with a toast showing what was undone.
 - [ ] Preferences: next day starts at, learn ahead limit, timebox time limit, show remaining count, show next review time above buttons, theme (system/light/dark), language left as English.
 - [ ] Check database (engine `check_database`), empty cards report and delete, backups: automatic daily backup of each user's collection to `data/users/<name>/backups/` keeping 30, and restore from the settings page.

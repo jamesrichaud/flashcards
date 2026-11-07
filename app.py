@@ -166,114 +166,7 @@ def logout(request: Request):
     request.session.clear()
     return RedirectResponse("/login", 303)
 
-# ---------- deck list ----------
-@app.get("/", response_class=HTMLResponse)
-def decks(request: Request):
-    user = current_user(request)
-    if not user: return need_login(request)
-    with collection(user) as col:
-        tree = col.sched.deck_due_tree()
-        rows = []
-        def walk(node, depth):
-            for ch in node.children:
-                if ch.name == "Default" and not ch.children and col.card_count() and \
-                        not col.find_cards(f"did:{ch.deck_id}"):
-                    continue
-                pad = depth * 22
-                rows.append(f"""<tr><td style="padding-left:{8 + pad}px">
-<a class="deck" href="/deck/{ch.deck_id}">{html.escape(ch.name)}</a></td>
-<td class="n new">{ch.new_count or '·'}</td><td class="n lrn">{ch.learn_count or '·'}</td>
-<td class="n rev">{ch.review_count or '·'}</td></tr>""")
-                walk(ch, depth + 1)
-        walk(tree, 0)
-    body = f"""<div class="box"><table><tr><th>Deck</th><th class="n">New</th><th class="n">Learn</th>
-<th class="n">Due</th></tr>{''.join(rows) or '<tr><td colspan=4 class="muted">No decks yet.</td></tr>'}</table></div>
-<div class="box"><form method="post" action="/deck/new" class="row">
-<input name="name" placeholder="New deck name (use :: for subdecks)" style="flex:1" required>
-<button>Create deck</button></form>
-<div class="row" style="margin-top:10px"><a class="btn" href="/filtered/new">Create filtered deck</a></div></div>"""
-    return page("Decks", body, user, "decks", take_flash(request))
-
-@app.post("/deck/new")
-def deck_new(request: Request, name: str = Form(...)):
-    user = current_user(request)
-    if not user: return need_login(request)
-    with collection(user) as col:
-        col.decks.id(name.strip())
-    return RedirectResponse("/", 303)
-
-# ---------- deck overview + options ----------
-@app.get("/deck/{did}", response_class=HTMLResponse)
-def deck_overview(request: Request, did: int):
-    user = current_user(request)
-    if not user: return need_login(request)
-    with collection(user) as col:
-        deck = col.decks.get(did, default=False)
-        if not deck: return RedirectResponse("/", 303)
-        select_deck(col, did)
-        new, lrn, rev = col.sched.counts()
-        total = len(col.find_cards(f'"deck:{deck["name"]}"'))
-        conf = col.decks.config_dict_for_deck_id(did) if not deck.get("dyn") else None
-    opts = ""
-    if conf:
-        opts = f"""<div class="box row"><div style="flex:1;min-width:200px"><h3 style="margin:0">Deck options</h3>
-<span class="muted" style="font-size:14px">Preset “{html.escape(conf['name'])}”: {conf['new']['perDay']} new/day,
-{conf['rev']['perDay']} reviews/day</span></div><a class="btn" href="/deck/{did}/custom">Custom study</a>
-<a class="btn" href="/deck/{did}/options">Options</a></div>"""
-    else:
-        opts = f"""<div class="box row"><div style="flex:1;min-width:200px"><h3 style="margin:0">Filtered deck</h3>
-<span class="muted" style="font-size:14px">Cards are borrowed from their home decks until the deck is emptied.</span></div>
-<a class="btn" href="/deck/{did}/filtered">Options</a>
-<form method="post" action="/deck/{did}/rebuild"><button>Rebuild</button></form>
-<form method="post" action="/deck/{did}/empty"><button>Empty</button></form></div>"""
-    body = f"""<div class="box" style="text-align:center"><h2 style="margin-top:0">{html.escape(deck['name'])}</h2>
-<div class="row" style="justify-content:center;gap:28px;font-size:20px">
-<span class="new">New <b>{new}</b></span><span class="lrn">Learning <b>{lrn}</b></span>
-<span class="rev">To review <b>{rev}</b></span></div>
-<p class="muted">{total} cards in deck</p>
-{'<a class="btn primary" style="min-width:200px" href="/study/%d">Study now</a>' % did if new + lrn + rev
- else '<p>Congratulations! You have finished this deck for now.</p>' + (
- f'<p class="muted">To study outside the regular schedule, use <a href="/deck/{did}/custom">Custom study</a>.</p>'
- if conf else '')}
-</div>{opts}
-<div class="box row"><a class="btn" href="/browse?q=%22deck:{html.escape(deck['name'])}%22">Browse cards</a>
-<a class="btn" href="/export?did={did}">Export…</a>
-<a class="btn" href="/stats?did={did}">Stats</a>
-<form method="post" action="/deck/{did}/rename" class="row" style="flex:1">
-<input name="name" value="{html.escape(deck['name'])}" style="flex:1"><button>Rename</button></form>
-<form method="post" action="/deck/{did}/delete" onsubmit="return confirm('Delete this deck and all its cards?')">
-<button class="danger">Delete deck</button></form></div>"""
-    return page(deck["name"], body, user, "decks", take_flash(request))
-
-@app.post("/deck/{did}/rename")
-def deck_rename(request: Request, did: int, name: str = Form(...)):
-    user = current_user(request)
-    if not user: return need_login(request)
-    with collection(user) as col:
-        col.decks.rename(did, name.strip())
-    return RedirectResponse(f"/deck/{did}", 303)
-
-@app.post("/deck/{did}/delete")
-def deck_delete(request: Request, did: int):
-    user = current_user(request)
-    if not user: return need_login(request)
-    with collection(user) as col:
-        col.decks.remove([did])
-    set_flash(request, "Deck deleted.")
-    return RedirectResponse("/", 303)
-
-@app.get("/deck/{did}/export")
-def deck_export(request: Request, did: int):
-    user = current_user(request)
-    if not user: return need_login(request)
-    with collection(user) as col:
-        name = col.decks.name(did)
-        out = os.path.join(tempfile.mkdtemp(), "deck.apkg")
-        col.export_anki_package(out_path=out, options=ExportAnkiPackageOptions(
-            with_scheduling=True, with_deck_configs=True, with_media=True, legacy=False),
-            limit=DeckIdLimit(did))
-    safe = re.sub(r"[^\w.-]+", "_", name) or "deck"
-    return FileResponse(out, filename=f"{safe}.apkg", media_type="application/octet-stream")
+# Deck list, overview, rename/move/collapse/description/delete/export: flashcards/decks.py
 
 # ---------- study ----------
 VIDEO_EXTS = (".mp4", ".webm", ".mov", ".mkv", ".ogv", ".m4v", ".avi", ".mpg", ".mpeg")
@@ -1270,6 +1163,8 @@ def healthz():
     return {"ok": True}
 
 # ---------- route modules ----------
+from flashcards import decks as deck_list  # noqa: E402
+app.include_router(deck_list.router)
 from flashcards import deck_options  # noqa: E402  (imports helpers from this module)
 app.include_router(deck_options.router)
 from flashcards import custom_study  # noqa: E402
