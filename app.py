@@ -1048,6 +1048,7 @@ placeholder="Search (Anki syntax: deck:French is:due tag:verb front:*cat*)"><but
 <div class="row"><div class="row seg" role="group" aria-label="Show">{seg}</div>
 <a class="btn" href="/filtered/new?search={quote(q)}" title="Create a filtered deck from this search">Filtered deck</a>
 <a class="btn" href="/export?q={quote(q)}" title="Export the notes in this search">Export</a>
+<a class="btn" href="/browse/dupes?search={quote(q)}" title="Find notes with the same field">Find duplicates</a>
 <details class="panel"><summary class="btn">Columns ▾</summary></details></div></div>
 <form id="colsform" method="post" action="/browse/columns" style="display:none;margin-top:10px">
 <input type="hidden" name="mode" value="{mode}"><input type="hidden" name="back" value="{html.escape(here)}">
@@ -1339,3 +1340,5 @@ app.include_router(whiteboard.router)
 from flashcards import reminders  # noqa: E402  (daily study reminders by Web Push; scheduler thread)
 app.include_router(reminders.router)
 app.router.on_startup.append(reminders.start)
+from flashcards import find_dupes  # noqa: E402  (Browse > Find duplicates)
+app.include_router(find_dupes.router)
