@@ -214,15 +214,9 @@ def deck_overview(request: Request, did: int):
         conf = col.decks.config_dict_for_deck_id(did) if not deck.get("dyn") else None
     opts = ""
     if conf:
-        opts = f"""<div class="box"><h3 style="margin-top:0">Deck options</h3>
-<form method="post" action="/deck/{did}/options">
-<div class="row"><div style="flex:1"><label>New cards/day</label><input name="new_per_day" type="number" min="0"
-value="{conf['new']['perDay']}"></div><div style="flex:1"><label>Maximum reviews/day</label>
-<input name="rev_per_day" type="number" min="0" value="{conf['rev']['perDay']}"></div>
-<div style="flex:1"><label>Desired retention</label><input name="retention" type="number" step="0.01" min="0.7"
-max="0.99" value="{conf.get('desiredRetention', 0.9)}"></div></div>
-<p class="muted" style="font-size:14px">Shared by all decks using the preset “{html.escape(conf['name'])}”.</p>
-<button>Save options</button></form></div>"""
+        opts = f"""<div class="box row"><div style="flex:1;min-width:200px"><h3 style="margin:0">Deck options</h3>
+<span class="muted" style="font-size:14px">Preset “{html.escape(conf['name'])}”: {conf['new']['perDay']} new/day,
+{conf['rev']['perDay']} reviews/day</span></div><a class="btn" href="/deck/{did}/options">Options</a></div>"""
     body = f"""<div class="box" style="text-align:center"><h2 style="margin-top:0">{html.escape(deck['name'])}</h2>
 <div class="row" style="justify-content:center;gap:28px;font-size:20px">
 <span class="new">New <b>{new}</b></span><span class="lrn">Learning <b>{lrn}</b></span>
@@ -238,20 +232,6 @@ max="0.99" value="{conf.get('desiredRetention', 0.9)}"></div></div>
 <form method="post" action="/deck/{did}/delete" onsubmit="return confirm('Delete this deck and all its cards?')">
 <button class="danger">Delete deck</button></form></div>"""
     return page(deck["name"], body, user, "decks", take_flash(request))
-
-@app.post("/deck/{did}/options")
-def deck_options(request: Request, did: int, new_per_day: int = Form(...), rev_per_day: int = Form(...),
-                 retention: float = Form(0.9)):
-    user = current_user(request)
-    if not user: return need_login(request)
-    with collection(user) as col:
-        conf = col.decks.config_dict_for_deck_id(did)
-        conf["new"]["perDay"] = max(0, new_per_day)
-        conf["rev"]["perDay"] = max(0, rev_per_day)
-        conf["desiredRetention"] = min(0.99, max(0.7, retention))
-        col.decks.update_config(conf)
-    set_flash(request, "Options saved.")
-    return RedirectResponse(f"/deck/{did}", 303)
 
 @app.post("/deck/{did}/rename")
 def deck_rename(request: Request, did: int, name: str = Form(...)):
@@ -1408,3 +1388,7 @@ def add_user(request: Request, username: str = Form(...), pw: str = Form(...)):
 @app.get("/healthz")
 def healthz():
     return {"ok": True}
+
+# ---------- route modules ----------
+from flashcards import deck_options  # noqa: E402  (imports helpers from this module)
+app.include_router(deck_options.router)
