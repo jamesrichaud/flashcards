@@ -238,6 +238,7 @@ def deck_overview(request: Request, did: int):
 </div>{opts}
 <div class="box row"><a class="btn" href="/browse?q=%22deck:{html.escape(deck['name'])}%22">Browse cards</a>
 <a class="btn" href="/export?did={did}">Export…</a>
+<a class="btn" href="/stats?did={did}">Stats</a>
 <form method="post" action="/deck/{did}/rename" class="row" style="flex:1">
 <input name="name" value="{html.escape(deck['name'])}" style="flex:1"><button>Rename</button></form>
 <form method="post" action="/deck/{did}/delete" onsubmit="return confirm('Delete this deck and all its cards?')">
@@ -1212,39 +1213,6 @@ async def browse_bulk(request: Request):
     set_flash(request, msg)
     return RedirectResponse(back, 303)
 
-# ---------- stats ----------
-@app.get("/stats", response_class=HTMLResponse)
-def stats(request: Request):
-    user = current_user(request)
-    if not user: return need_login(request)
-    with collection(user) as col:
-        day_cut = col.sched.day_cutoff
-        today = col.db.first(
-            "select count(), sum(case when ease=1 then 1 else 0 end), sum(time)/1000 from revlog where id > ?",
-            (day_cut - 86400) * 1000)
-        week = col.db.all(
-            "select (id/1000 - ?)/86400 as d, count() from revlog where id > ? group by d",
-            day_cut, (day_cut - 86400 * 7) * 1000)
-        totals = col.db.first("select count(), sum(case when queue=0 then 1 else 0 end), "
-                              "sum(case when queue=2 then 1 else 0 end), sum(case when queue=-1 then 1 else 0 end) from cards")
-        due_tomorrow = len(col.find_cards("prop:due=1"))
-    n, again, secs = today[0] or 0, today[1] or 0, today[2] or 0
-    correct = f"{round(100 * (n - again) / n)}%" if n else "—"
-    by_day = {int(d): c for d, c in week}
-    mx = max(by_day.values() or [1])
-    bars = "".join(f"""<div style="flex:1;text-align:center"><div style="height:120px;display:flex;align-items:flex-end">
-<div style="width:100%;background:var(--accent);border-radius:6px 6px 0 0;height:{int(110 * by_day.get(d, 0) / mx) + 2}px"></div></div>
-<small class="muted">{'Today' if d == -1 else f'{-d - 1}d ago'}</small><br><small>{by_day.get(d, 0)}</small></div>"""
-                   for d in range(-7, 0))
-    body = f"""<div class="box"><h3 style="margin-top:0">Today</h3><div class="row" style="gap:32px;font-size:18px">
-<span>Studied <b>{n}</b> cards in <b>{secs // 60}</b> min</span><span>Correct <b>{correct}</b></span>
-<span>Due tomorrow <b>{due_tomorrow}</b></span></div></div>
-<div class="box"><h3 style="margin-top:0">Reviews, last 7 days</h3><div class="row" style="flex-wrap:nowrap;gap:6px">{bars}</div></div>
-<div class="box"><h3 style="margin-top:0">Collection</h3><div class="row" style="gap:32px">
-<span>Total cards <b>{totals[0] or 0}</b></span><span class="new">New <b>{totals[1] or 0}</b></span>
-<span class="rev">Review <b>{totals[2] or 0}</b></span><span class="muted">Suspended <b>{totals[3] or 0}</b></span></div></div>"""
-    return page("Stats", body, user, "stats")
-
 # ---------- settings ----------
 @app.get("/settings", response_class=HTMLResponse)
 def settings(request: Request):
@@ -1318,3 +1286,5 @@ from flashcards import import_export  # noqa: E402
 app.include_router(import_export.router)
 from flashcards import media as media_check  # noqa: E402
 app.include_router(media_check.router)
+from flashcards import stats as stats_page  # noqa: E402
+app.include_router(stats_page.router)
