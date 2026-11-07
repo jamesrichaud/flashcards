@@ -51,6 +51,12 @@ assert r.json()["ok"]
 with webapp.collection("friend") as col: assert col.get_note(cur_nid)["Back"] == "FIXED"
 r = c.post(f"/addon/edit_field_review/note/{cur_nid}", data={"fields": "x"}); assert r.status_code == 400
 ok("Edit Field During Review: loads fields, saves an edit, rejects non-JSON posts")
+# Its white form must stay light inside a dark-mode card (color-scheme:dark would give white-on-white buttons).
+from bundled_addons import edit_field_review as _efr, popup_dictionary as _pd
+assert "<form style=\"color-scheme:light;background:#fff;color:#111;" in _efr.SCRIPT, "edit form not pinned to light"
+assert "background:#fff;color:#111;font:inherit\">'+esc(T.cancel)" in _efr.SCRIPT
+assert "color-scheme:light;background:#fff;" in _pd.SCRIPT  # Pop-up Dictionary's light popup too
+ok("Edit Field form and Pop-up Dictionary popup stay readable in dark mode")
 
 # 4. Speed Focus: off until times are set, then injects the timer
 assert "secs=" not in study_html()

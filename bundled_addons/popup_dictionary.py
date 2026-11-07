@@ -20,7 +20,7 @@ function wordAt(){var s=document.getSelection();if(!s||s.isCollapsed)return '';
  return w.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu,'');}
 async function lookup(){var w=wordAt();if(!w)return;var s=document.getSelection(),r=s.getRangeAt(0).getBoundingClientRect();
  close();pop=document.createElement('div');pop.id='pd-pop';
- pop.style.cssText='position:absolute;z-index:70;max-width:min(420px,90vw);background:#fff;color:#111;border:1px solid #ccc;'
+ pop.style.cssText='position:absolute;z-index:70;max-width:min(420px,90vw);color-scheme:light;background:#fff;color:#111;border:1px solid #ccc;'
   +'border-radius:12px;padding:12px 14px;box-shadow:0 6px 24px rgba(0,0,0,.18);font:15px/1.4 system-ui,sans-serif;text-align:left';
  pop.style.left=Math.max(8,Math.min(r.left+scrollX,document.documentElement.clientWidth-300))+'px';
  pop.style.top=(r.bottom+scrollY+8)+'px';

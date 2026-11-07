@@ -29,12 +29,12 @@ document.getElementById('efr-btn').addEventListener('click',async function(e){
  var j;try{j=await(await fetch(URL)).json();}catch(err){alert(T.load);return;}
  var o=document.createElement('div');o.id='efr';
  o.style.cssText='position:fixed;inset:0;z-index:60;background:rgba(0,0,0,.45);display:flex;align-items:flex-start;justify-content:center;padding:16px;overflow:auto';
- var h='<form style="background:#fff;color:#111;border-radius:14px;padding:16px;width:100%;max-width:640px;font:16px system-ui,sans-serif;text-align:left">'
+ var h='<form style="color-scheme:light;background:#fff;color:#111;border-radius:14px;padding:16px;width:100%;max-width:640px;font:16px system-ui,sans-serif;text-align:left">'
   +'<b style="font-size:18px">'+esc(T.edit)+'</b>';
  j.fields.forEach(function(f,i){h+='<label style="display:block;margin:12px 0 4px;color:#666;font-size:14px">'+esc(f.name)+'</label>'
-  +'<textarea data-name="'+esc(f.name)+'" style="width:100%;box-sizing:border-box;min-height:70px;padding:10px;border:1px solid #ccc;border-radius:10px;font:inherit">'+esc(f.value)+'</textarea>';});
+  +'<textarea data-name="'+esc(f.name)+'" style="width:100%;box-sizing:border-box;min-height:70px;padding:10px;border:1px solid #ccc;border-radius:10px;background:#fff;color:#111;font:inherit">'+esc(f.value)+'</textarea>';});
  h+='<div style="display:flex;gap:10px;margin-top:14px;justify-content:flex-end">'
-  +'<button type="button" id="efr-cancel" style="min-height:44px;padding:0 18px;border-radius:10px;border:1px solid #ccc;background:#fff;font:inherit">'+esc(T.cancel)+'</button>'
+  +'<button type="button" id="efr-cancel" style="min-height:44px;padding:0 18px;border-radius:10px;border:1px solid #ccc;background:#fff;color:#111;font:inherit">'+esc(T.cancel)+'</button>'
   +'<button type="button" id="efr-save" style="min-height:44px;padding:0 18px;border-radius:10px;border:0;background:#2f6fde;color:#fff;font:inherit">'+esc(T.save)+'</button></div>'
   +'<p style="color:#888;font-size:13px;margin:10px 0 0">'+esc(T.html)+'</p></form>';
  o.innerHTML=h;document.body.appendChild(o);

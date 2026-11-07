@@ -153,8 +153,15 @@ def run(url, data=None):
     if not loc.startswith("/import/url/"):
         return loc, None
     jid = loc.rsplit("/", 1)[1]
-    page = c.get(loc)
-    assert 'data-status="/import/url/' in page.text or page.history, page.text[:300]
+    # Don't follow redirects: if the job already finished, the page redirects to "/" and following
+    # it would use up the flash message the caller checks next.
+    page = c.get(loc, follow_redirects=False)
+    if page.status_code == 303:
+        assert page.headers["location"] in ("/", "/import") or page.headers["location"].startswith("/import/colpkg/")
+        s = c.get(f"/import/url/{jid}/status").json()
+        assert s["state"] == "done" and s["go"] == page.headers["location"], s
+        return s, jid
+    assert 'data-status="/import/url/' in page.text, page.text[:300]
     for _ in range(200):
         s = c.get(f"/import/url/{jid}/status").json()
         if s["state"] == "error" or s.get("go"):
