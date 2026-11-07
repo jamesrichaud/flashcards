@@ -22,6 +22,13 @@ Everything an add-on may define is optional:
     def home(request): ...                     # use flashcards.addons.page()/user() helpers
     MENU = [("Open my page", "/")]             # links shown on the Add-ons page
 
+    def deck_overview(col, did):               # extra HTML under the deck overview's counts
+        return '<div class="box">...</div>'
+    def study_page(col, card):                 # extra HTML/script at the end of the study screen
+        return "<script>...</script>"          # (it may call the page's show(), answer(n), act(...))
+    def browse_tools(col, mode):               # extra HTML in Browse's action bar; a button with
+        return "..."                           # formaction="/addon/<id>/..." posts the selection
+
 An add-on that fails (on import or in a hook) never stops studying: the error is logged,
 shown on the Add-ons page, and the card/answer carries on as if the add-on wasn't there.
 An add-on whose file changes is loaded again on the next request.
@@ -38,8 +45,9 @@ router = APIRouter()
 
 ID_PAT = re.compile(r"[A-Za-z0-9_-]{1,64}")
 ANKI_DESKTOP_PAT = re.compile(r"^\s*(from|import)\s+aqt\b", re.M)
-HOOKS = ("card_render", "after_answer")
-HOOK_LABELS = {"card_render": N_("card render"), "after_answer": N_("after answer")}   # shown on the Add-ons page
+HOOKS = ("card_render", "after_answer", "deck_overview", "study_page", "browse_tools")
+HOOK_LABELS = {"card_render": N_("card render"), "after_answer": N_("after answer"),   # shown on the Add-ons page
+               "deck_overview": N_("deck overview"), "study_page": N_("study screen"), "browse_tools": N_("Browse")}
 
 
 def addons_dir():
@@ -235,6 +243,26 @@ def after_answer(col, card, rating):
                 fn(col, card, rating)
             except Exception:
                 log_error(aid, "after_answer")
+
+
+def html_hook(name, col, *args):
+    """Join the HTML that enabled add-ons return from a page hook (deck_overview, study_page,
+    browse_tools). A hook that fails or returns something other than text adds nothing."""
+    out = []
+    for aid, mod in active():
+        fn = getattr(mod, name, None)
+        if not callable(fn):
+            continue
+        try:
+            got = fn(col, *args)
+        except Exception:
+            log_error(aid, name)
+            continue
+        if isinstance(got, str):
+            out.append(got)
+        elif got is not None:
+            _errors[aid] = t("{hook}: must return HTML as text", hook=name)
+    return "".join(out)
 
 
 # ---------- helpers for add-on pages ----------

@@ -115,6 +115,13 @@ def card_render(text, card, kind, col):    # kind: "question" or "answer"
 def after_answer(col, card, rating):       # rating: 1 Again, 2 Hard, 3 Good, 4 Easy
     ...
 
+def deck_overview(col, did):               # extra HTML on the deck overview
+    return ""
+def study_page(col, card):                 # extra HTML/script on the study screen
+    return ""
+def browse_tools(col, mode):               # extra HTML in Browse's action bar; a button with
+    return ""                              # data-addon formaction="/addon/<id>/..." posts the selection
+
 from fastapi import APIRouter
 from flashcards import addons
 router = APIRouter()                       # extra pages at /addon/<name>/... (login needed)
@@ -124,10 +131,12 @@ def home(request):
 MENU = [("Open", "/")]                     # buttons on the Add-ons page
 ```
 
-Six add-ons come with the app in `bundled_addons/`, all off until turned on in Settings → Add-ons:
+Eleven add-ons come with the app in `bundled_addons/`, all off until turned on in Settings → Add-ons:
 Edit Field During Review, Speed Focus Mode, Read Aloud (text-to-speech), Pop-up Dictionary,
-Study Streaks & Achievements, and AnkiConnect (for Yomitan and other tools; each person makes their
-own key on the add-on's page). Add-ons are turned on for the whole server; each person has their own settings.
+Study Streaks & Achievements, AnkiConnect (for Yomitan and other tools; each person makes their
+own key on the add-on's page), Customize Keyboard Shortcuts, More Overview Stats, Advanced Copy
+Fields (a panel in Browse), Hierarchical Tags Filter (tag tree on the deck overview) and Anki
+Simulator (future daily workload from the engine's FSRS simulator). Add-ons are turned on for the whole server; each person has their own settings.
 
 A worked example is in `addons_examples/answer_counter.py`; copy it into `data/addons/` to try
 it. An add-on that raises an error is skipped (studying carries on) and the error is shown on

@@ -665,6 +665,7 @@ def study(request: Request, did: int, cid: int = 0, shown: int = 0, ms: int = 0,
         theme = theme_of(col)
         tap = touch_mod.tap_zones(col)
         wb = whiteboard.settings(col)
+        addon_html = addons.html_hook("study_page", col, card)   # enabled add-ons' extra script (flashcards/addons.py)
     timebox_start(request, did)
     # Coming back from Edit or Card info: same card, same side, timer carries on.
     resume = cid == card.id
@@ -819,7 +820,7 @@ if({js(start_shown)})show();else{{load(Q);if(AV.autoplay&&!quiet)playList(AV.q);
 const FL={js(flash.lstrip('!'))};if(FL)toast(FL);
 window.FC_AFTER_UNDO='/study/{did}';
 window.addEventListener('pageshow',e=>{{if(e.persisted)sent=false;}});
-</script>{whiteboard.study_script(wb)}"""
+</script>{whiteboard.study_script(wb)}{addon_html}"""
     return page(t("Study"), body, user, "decks")
 
 @app.post("/study/{did}/typeans")
@@ -1109,6 +1110,7 @@ aria-label="{select_label}"></td>{''.join(tds)}<td class="muted state">{flag_dot
             f'{html.escape(c.notes_mode_label if notes else c.cards_mode_label)}</label>'
             for c in sorted(all_cols.values(), key=lambda c: (c.notes_mode_label if notes else c.cards_mode_label)))
         side = sidebar_mod.sidebar_html(col, q)
+        addon_tools = addons.html_hook("browse_tools", col, mode)
     nav = ""
     if total > per:
         last = (total - 1) // per
@@ -1190,7 +1192,7 @@ placeholder="{html.escape(t("Search (Anki syntax: deck:French is:due tag:verb fr
 <label class="chk"><input type="checkbox" name="regex" value="1">{h(t("Regex"))}</label>
 <label class="chk"><input type="checkbox" name="match_case" value="1">{h(t("Match case"))}</label>
 <button name="do_replace" value="1">{h(t("Replace"))}</button></div>
-<p class="muted" style="font-size:14px;margin-bottom:0">{h(t("Works on the selected notes (or every note in the search when “All” is ticked)."))}</p></details></div>
+<p class="muted" style="font-size:14px;margin-bottom:0">{h(t("Works on the selected notes (or every note in the search when “All” is ticked)."))}</p></details>{addon_tools}</div>
 <div class="box" style="overflow-x:auto;padding:8px"><table class="btable"><tr><th class="sel"><input type="checkbox" id="selall"
 aria-label="{html.escape(t("Select all on this page"))}"></th>{''.join(heads)}<th>{h(t("State"))}</th><th></th></tr>{''.join(rows)}</table></div></form>{nav}
 <script>
@@ -1204,7 +1206,7 @@ document.getElementById('selall').onchange=e=>{{boxes().forEach(b=>b.checked=e.t
 bulk.addEventListener('change',e=>{{if(e.target.name==='ids'||e.target===allq)count();}});
 op.onchange=()=>document.querySelectorAll('.arg').forEach(a=>a.classList.toggle('show',a.dataset.op.split(' ').includes(op.value)));
 bulk.onsubmit=e=>{{const n=allq.checked?{total}:boxes().filter(b=>b.checked).length;
- const rep=e.submitter&&e.submitter.name==='do_replace';
+ const rep=e.submitter&&(e.submitter.name==='do_replace'||'addon' in e.submitter.dataset);  // add-on buttons need no Action
  if(!n){{e.preventDefault();alert(MSG.none);return;}}
  if(!rep&&!op.value){{e.preventDefault();alert(MSG.choose);return;}}
  if(!rep&&op.value==='delete'&&!confirm(MSG.del.replace('{{n}}',n)))e.preventDefault();
