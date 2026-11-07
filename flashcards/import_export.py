@@ -80,6 +80,13 @@ def _clean_uploads():
         _uploads.pop(tok, None)
 
 
+NO_FILE_MSG = N_("No file arrived. On an iPad, a Google Doc isn't a real file: in Google Docs use Share and export, then Save as Word (.docx), or copy your notes into “Paste your notes” below.")
+
+
+def no_file(file):
+    return file is None or not (file.filename or "").strip()
+
+
 async def save_upload(user, file, ext):
     _clean_uploads()
     token = secrets.token_hex(12)
@@ -219,9 +226,15 @@ def import_page(request: Request):
 {shared_decks.form_html(tr, p)}
 <div class="box"><h2 style="margin-top:0">{esc(t("Import a text file"))}</h2>
 <p>{core.ht(t("Choose a {csv}, {tsv} or {txt} file with one note per line."), csv="<b>.csv</b>", tsv="<b>.tsv</b>", txt="<b>.txt</b>")}
+{esc(t("Word files (.docx) work too: a table becomes one card per row."))}
 {esc(t("Next you can pick the separator, note type, deck and which column goes into which field."))}</p>
 <form method="post" action="/import/csv" enctype="multipart/form-data">
-<input type="file" name="file" accept=".csv,.tsv,.txt,text/plain,text/csv" required>
+<input type="file" name="file" accept=".csv,.tsv,.txt,.docx,text/plain,text/csv" required>
+<p><button class="primary">{esc(t("Next"))}</button></p></form></div>
+<div class="box"><h2 style="margin-top:0">{esc(t("Paste your notes"))}</h2>
+<p>{esc(t("Copy notes from Google Docs, Notes or anywhere else. Put one card per line, with the question and answer split by a tab, “ - ”, “: ” or “ = ”. A copied table works too."))}</p>
+<form method="post" action="/import/paste"><textarea name="text" rows="8" required
+placeholder="{esc(t("el perro - the dog"))}&#10;{esc(t("Mitochondria: powerhouse of the cell"))}"></textarea>
 <p><button class="primary">{esc(t("Next"))}</button></p></form></div>
 {log_html(user)}
 <div class="box row" style="justify-content:space-between"><span>{esc(t("Make a backup or share a deck."))}</span>
@@ -266,9 +279,12 @@ def import_package(user, path, name, opts):
 
 
 @router.post("/import")
-async def do_import(request: Request, file: UploadFile = File(...)):
+async def do_import(request: Request, file: UploadFile = File(None)):
     user = core.current_user(request)
     if not user: return core.need_login(request)
+    if no_file(file):
+        core.set_flash(request, "!" + t(NO_FILE_MSG))
+        return RedirectResponse("/import", 303)
     form = await request.form()
     ext = ext_of(file.filename)
     if ext not in PACKAGE_EXTS:
@@ -360,13 +376,99 @@ async def colpkg_import(request: Request, token: str):
 
 
 # ---------- text (CSV) import ----------
-@router.post("/import/csv")
-async def csv_upload(request: Request, file: UploadFile = File(...)):
+SPLITS = ("\t", " - ", " – ", " — ", " = ", ": ", " : ")
+
+
+def lines_to_tsv(text):
+    """Pasted notes -> tab-separated lines: question<TAB>answer (first separator found on each line)."""
+    out = []
+    for raw in text.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        line = raw.strip().lstrip("•·*-– ").strip() if not raw.startswith("\t") else raw.strip()
+        if not line:
+            continue
+        if "\t" in raw.strip():
+            out.append("\t".join(c.strip() for c in raw.strip().split("\t")))
+            continue
+        for sep in SPLITS[1:]:
+            if sep in line:
+                q, a = line.split(sep, 1)
+                out.append(q.strip() + "\t" + a.strip())
+                break
+        else:
+            out.append(line)
+    return "\n".join(out) + "\n"
+
+
+def docx_text(data):
+    """Text of a Word file: table rows as tab-separated lines, other paragraphs as lines."""
+    import io, zipfile
+    from xml.etree import ElementTree as ET
+    W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as z:
+            info = z.getinfo("word/document.xml")
+            if info.file_size > 50 * 1024 * 1024:
+                raise ValueError("too big")
+            root = ET.fromstring(z.read(info))
+    except (zipfile.BadZipFile, KeyError, ET.ParseError) as e:
+        raise ValueError(str(e))
+    text_of = lambda el: "".join(n.text or "" for n in el.iter(W + "t")).strip()
+    lines = []
+    body = root.find(W + "body")
+    for el in (body if body is not None else []):
+        if el.tag == W + "tbl":
+            for row in el.iter(W + "tr"):
+                cells = [text_of(c).replace("\t", " ") for c in row.findall(W + "tc")]
+                if any(cells):
+                    lines.append("\t".join(cells))
+        elif el.tag == W + "p":
+            tx = text_of(el)
+            if tx:
+                lines.append(tx)
+    return "\n".join(lines)
+
+
+def paste_to_import(request, user, text, name):
+    tsv = lines_to_tsv(text)
+    if not tsv.strip():
+        core.set_flash(request, "!" + t("There was nothing to import."))
+        return RedirectResponse("/import", 303)
+    _clean_uploads()
+    token = secrets.token_hex(12)
+    path = os.path.join(UPLOAD_DIR, token + ".txt")
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(tsv)
+    _uploads[token] = {"user": user, "path": path, "name": name}
+    return RedirectResponse(f"/import/csv/{token}", 303)
+
+
+@router.post("/import/paste")
+async def paste_import(request: Request):
     user = core.current_user(request)
     if not user: return core.need_login(request)
-    ext = ext_of(file.filename)
+    form = await request.form()
+    text = str(form.get("text", ""))[:5_000_000]
+    return paste_to_import(request, user, text, t("Pasted notes") + ".txt")
+
+
+@router.post("/import/csv")
+async def csv_upload(request: Request, file: UploadFile = File(None)):
+    user = core.current_user(request)
+    if not user: return core.need_login(request)
+    if no_file(file):
+        core.set_flash(request, "!" + t(NO_FILE_MSG))
+        return RedirectResponse("/import", 303)
+    ext = ".docx" if (file.filename or "").lower().endswith(".docx") else ext_of(file.filename)
+    if ext == ".docx":
+        data = await file.read()
+        try:
+            text = docx_text(data)
+        except ValueError:
+            core.set_flash(request, "!" + t("That Word file couldn't be read. Try copying the notes into “Paste your notes” instead."))
+            return RedirectResponse("/import", 303)
+        return paste_to_import(request, user, text, os.path.splitext(os.path.basename(file.filename))[0] + ".txt")
     if ext not in TEXT_EXTS:
-        core.set_flash(request, "!" + t("Please choose a .csv, .tsv or .txt file. Anki decks (.apkg) go under “Import a deck”."))
+        core.set_flash(request, "!" + t("Please choose a .csv, .tsv, .txt or Word (.docx) file. Anki decks (.apkg) go under “Import a deck”."))
         return RedirectResponse("/import", 303)
     token = await save_upload(user, file, ext)
     return RedirectResponse(f"/import/csv/{token}", 303)
