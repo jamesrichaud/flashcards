@@ -16,9 +16,8 @@ from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
 from anki import import_export_pb2 as pb
 from anki.collection import (Collection, ImportAnkiPackageRequest, ImportAnkiPackageOptions, ImportCsvRequest,
                              ExportAnkiPackageOptions, CsvMetadata, DeckIdLimit, NoteIdsLimit, CardIdsLimit)
-from anki.media import media_paths_from_col_path
-
 import app as core
+from flashcards import maintenance
 
 router = APIRouter()
 Update = pb.ImportAnkiPackageUpdateCondition
@@ -291,7 +290,7 @@ def colpkg_cancel(request: Request, token: str):
 
 
 def backup_folder(user):
-    return os.path.join(core.DATA, "users", user, "backups")
+    return maintenance.backup_folder(user)
 
 
 @router.post("/import/colpkg/{token}")
@@ -307,26 +306,14 @@ async def colpkg_import(request: Request, token: str):
         core.set_flash(request, "!Tick the box to confirm that everything will be replaced.")
         return RedirectResponse(f"/import/colpkg/{token}", 303)
     with core.collection(user) as col:
-        os.makedirs(backup_folder(user), exist_ok=True)
         try:
-            col.create_backup(backup_folder=backup_folder(user), force=True, wait_for_completion=True)
+            # Through the backups module, so its own rotation (keep 30) applies.
+            maintenance.make_backup(user, col)
         except Exception as e:
             core.set_flash(request, f"!Could not back up the current collection, so nothing was replaced: {e}")
             return RedirectResponse(f"/import/colpkg/{token}", 303)
-        path = col.path
-        media_folder, media_db = media_paths_from_col_path(path)
-        backend = col._backend
-        col.close()
-        try:
-            backend.import_collection_package(col_path=path, backup_path=up["path"],
-                                              media_folder=media_folder, media_db=media_db)
-            ok = True
-        except Exception as e:
-            ok, err = False, str(e)
-        # The old Collection object is closed; open a fresh one (the old file, if the import failed).
-        new = core._cols[user] = Collection(path)
-        if new.get_config("fsrs", None) is None:
-            new.set_config("fsrs", False)  # desktop Anki's meaning of a missing setting: FSRS off
+        # The old Collection object is closed and a fresh one opened (the old file, if the import failed).
+        ok, err = maintenance.replace_collection(user, col, up["path"])
         if ok:
             core.set_flash(request, f"Collection replaced with {up['name']}: "
                            f"{plural(core._cols[user].note_count(), 'note')}.")

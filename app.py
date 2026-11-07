@@ -64,6 +64,7 @@ def collection(user):
             if col.get_config("fsrs", None) is None:
                 col.set_config("fsrs", True)
             _cols[user] = col
+        maintenance.maybe_daily_backup(user, _cols[user])  # once a day; never raises
         yield _cols[user]
 
 def select_deck(col, did):
@@ -1198,6 +1199,15 @@ def settings(request: Request):
 <div class="box row" style="justify-content:space-between"><div><h3 style="margin:0">Media</h3>
 <span class="muted">Find missing and unused pictures and sounds.</span></div>
 <a class="btn" href="/check-media">Check media</a></div>
+<div class="box row" style="justify-content:space-between"><div><h3 style="margin:0">Check database</h3>
+<span class="muted">Find and fix problems in your collection.</span></div>
+<a class="btn" href="/check-database">Check database</a></div>
+<div class="box row" style="justify-content:space-between"><div><h3 style="margin:0">Empty cards</h3>
+<span class="muted">Find and delete cards with a blank front.</span></div>
+<a class="btn" href="/empty-cards">Empty cards</a></div>
+<div class="box row" style="justify-content:space-between"><div><h3 style="margin:0">Backups</h3>
+<span class="muted">{html.escape(maintenance.latest_backup_line(user))}</span></div>
+<a class="btn" href="/backups">Backups and restore</a></div>
 <div class="box"><h3 style="margin-top:0">Scheduler</h3><form method="post" action="/settings/fsrs" class="row">
 <span style="flex:1">FSRS scheduling (Anki's modern algorithm) is <b>{'on' if fsrs else 'off'}</b>.</span>
 <button>{'Turn off (use SM-2)' if fsrs else 'Turn on'}</button></form></div>
@@ -1266,3 +1276,5 @@ from flashcards import undo as undo_mod  # noqa: E402  (page() uses it for the h
 app.include_router(undo_mod.router)
 from flashcards import preferences as preferences_page  # noqa: E402
 app.include_router(preferences_page.router)
+from flashcards import maintenance  # noqa: E402  (collection() uses it for the daily backup)
+app.include_router(maintenance.router)
