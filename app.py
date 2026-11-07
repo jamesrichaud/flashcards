@@ -334,12 +334,13 @@ def type_answer(info, text):
 
 # MathJax for \( \) and \[ \] in cards, set up like Anki's reviewer (MathJax 3; loaded only when
 # a card uses it). Once typeset, the frame gets an "fc-resize" event so its page can resize it.
+# Bundled (flashcards/static/mathjax, the same build desktop Anki ships) so it also works offline.
 MATHJAX_PAT = re.compile(r"\\[(\[]")
 MATHJAX = r"""<script>window.MathJax={tex:{displayMath:[["\\[","\\]"]],processEscapes:false,
 processEnvironments:false,processRefs:false},startup:{typeset:true,pageReady(){
 return MathJax.startup.defaultPageReady().then(function(){try{window.frameElement&&
 window.frameElement.dispatchEvent(new Event("fc-resize"))}catch(e){}})}}};</script>
-<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg-full.js"></script>"""
+<script async src="/static/mathjax/tex-chtml-full.js" data-build="mathjax@3.2.2"></script>"""
 
 CARD_DARK_CSS = """body{background:#232325;color:#f2f2f2}.card{background:transparent!important;color:#f2f2f2!important}
 input#typeans{background:#161617;color:#f2f2f2;border-color:#555}.replay-button circle{fill:#333;stroke:#777}
@@ -639,6 +640,27 @@ def timebox_answered(request, col, did):
     msg = f"{col.tr.studying_card_studied_in(count=tb['n'])} {col.tr.studying_minute(count=mins)}"
     return re.sub(r"[⁨⁩]", "", msg)
 
+# The study screen's look (also used by the offline study page, flashcards/offline.py).
+STUDY_CSS = """main{max-width:900px}#frame{width:100%;min-height:55vh;border:1px solid var(--line);
+border-radius:14px;background:var(--card)}.bar{position:sticky;bottom:0;padding:12px 0;background:var(--bg)}
+.ans{flex:1;min-height:64px;font-weight:600}.ans small{font-weight:400;opacity:.8}
+.counts span{margin:0 6px;font-variant-numeric:tabular-nums}.counts .cur{text-decoration:underline}
+.more{position:relative}.more summary{list-style:none}.more summary::-webkit-details-marker{display:none}
+.menu{position:absolute;right:0;top:50px;z-index:10;background:var(--card);border:1px solid var(--line);border-radius:14px;
+padding:8px;width:280px;box-shadow:0 8px 30px rgba(0,0,0,.18);display:flex;flex-direction:column;gap:4px}
+.menu button{text-align:left;border:0;display:flex;justify-content:space-between;align-items:center}
+.menu button:hover{background:var(--bg)}.menu kbd{color:var(--muted);font:13px ui-monospace,monospace}
+.flags{display:grid;grid-template-columns:1fr 1fr;gap:2px;border-top:1px solid var(--line);padding-top:6px;margin-top:4px}
+.flags button{justify-content:flex-start;gap:8px;padding:9px 10px;font-size:15px}
+.dot{display:inline-block;width:12px;height:12px;border-radius:50%}
+#flag{width:14px;height:14px}#mark{color:#c98a16;font-size:20px}
+#toast{position:fixed;left:50%;bottom:calc(110px + env(safe-area-inset-bottom));transform:translateX(-50%);
+background:var(--ink);color:var(--bg);
+padding:10px 18px;border-radius:10px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:20}
+html,body{overscroll-behavior:none}.bar{padding-bottom:max(12px,env(safe-area-inset-bottom))}
+.ans,#show{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+#taphint{font-size:13px;text-align:center;margin:0 0 6px}"""
+
 @app.get("/study/{did}", response_class=HTMLResponse)
 def study(request: Request, did: int, cid: int = 0, shown: int = 0, ms: int = 0, typed: str = ""):
     user = current_user(request)
@@ -700,25 +722,7 @@ onclick="answer({i + 1})">{f'<small>{html.escape(labels[i])}</small><br>' if sho
     has_audio = any(x["t"] != "video" for x in av["q"] + av["a"])
     replay_btn = (f'<button type="button" id="replay" onclick="replay()" title="{html.escape(t("Replay audio (R)"))}" '
                   f'aria-label="{html.escape(t("Replay audio"))}">🔊</button>' if has_audio else "")
-    body = f"""<style>main{{max-width:900px}}#frame{{width:100%;min-height:55vh;border:1px solid var(--line);
-border-radius:14px;background:var(--card)}}.bar{{position:sticky;bottom:0;padding:12px 0;background:var(--bg)}}
-.ans{{flex:1;min-height:64px;font-weight:600}}.ans small{{font-weight:400;opacity:.8}}
-.counts span{{margin:0 6px;font-variant-numeric:tabular-nums}}.counts .cur{{text-decoration:underline}}
-.more{{position:relative}}.more summary{{list-style:none}}.more summary::-webkit-details-marker{{display:none}}
-.menu{{position:absolute;right:0;top:50px;z-index:10;background:var(--card);border:1px solid var(--line);border-radius:14px;
-padding:8px;width:280px;box-shadow:0 8px 30px rgba(0,0,0,.18);display:flex;flex-direction:column;gap:4px}}
-.menu button{{text-align:left;border:0;display:flex;justify-content:space-between;align-items:center}}
-.menu button:hover{{background:var(--bg)}}.menu kbd{{color:var(--muted);font:13px ui-monospace,monospace}}
-.flags{{display:grid;grid-template-columns:1fr 1fr;gap:2px;border-top:1px solid var(--line);padding-top:6px;margin-top:4px}}
-.flags button{{justify-content:flex-start;gap:8px;padding:9px 10px;font-size:15px}}
-.dot{{display:inline-block;width:12px;height:12px;border-radius:50%}}
-#flag{{width:14px;height:14px}}#mark{{color:#c98a16;font-size:20px}}
-#toast{{position:fixed;left:50%;bottom:calc(110px + env(safe-area-inset-bottom));transform:translateX(-50%);
-background:var(--ink);color:var(--bg);
-padding:10px 18px;border-radius:10px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:20}}
-html,body{{overscroll-behavior:none}}.bar{{padding-bottom:max(12px,env(safe-area-inset-bottom))}}
-.ans,#show{{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}}
-#taphint{{font-size:13px;text-align:center;margin:0 0 6px}}{whiteboard.CSS}</style>
+    body = f"""<style>{STUDY_CSS}{whiteboard.CSS}</style>
 <div class="row" style="justify-content:space-between;margin-bottom:10px">
 <a href="/deck/{did}" class="btn">{h(t("← Deck"))}</a>
 <div class="counts"><span id="flag" class="dot" title="{html.escape(t("{flag} flag", flag=t(FLAG_NAME[flag])))}"

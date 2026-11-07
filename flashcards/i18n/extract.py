@@ -56,7 +56,8 @@ def scan():
                     singles.add(key)
                 elif isinstance(node.args[0], ast.JoinedStr):
                     problems.append(f"{rel}:{node.lineno}: {name}() with an f-string; use {{name}} placeholders")
-            elif name == "tn" and len(node.args) >= 3:
+            elif (name == "tn" and len(node.args) >= 3) or (name == "plural_table" and len(node.args) == 2):
+                # plural_table(one, many): a plural message for the browser (flashcards/offline.py)
                 one, many = _const(node.args[0]), _const(node.args[1])
                 if one is not None and many is not None:
                     plurals[one] = many

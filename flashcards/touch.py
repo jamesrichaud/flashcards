@@ -129,7 +129,8 @@ def body_script():
     """The offline banner and service worker registration, in the request's language.
     core.page reads it as `touch_mod.BODY_SCRIPT` (see __getattr__ below)."""
     banner = html.escape(t("You're offline. Changes can't be saved until the connection is back."), False)
-    return f"""<div id="fc-offline" role="status" hidden>{banner}</div>
+    study = html.escape(t("Study offline"), False)   # the offline study page (flashcards/offline.py)
+    return f"""<div id="fc-offline" role="status" hidden>{banner} <a href="/offline/study">{study}</a></div>
 <script>(function(){{const b=document.getElementById('fc-offline');
 function upd(){{b.hidden=navigator.onLine!==false;}}window.addEventListener('online',upd);window.addEventListener('offline',upd);upd();
 if('serviceWorker' in navigator&&window.isSecureContext)navigator.serviceWorker.register('/sw.js').catch(()=>{{}});}})();</script>"""
@@ -156,17 +157,44 @@ input[type=checkbox],input[type=radio]{min-width:22px;min-height:22px}
 html:has([data-noundokey]){overscroll-behavior:none}
 #fc-offline{position:fixed;left:0;right:0;bottom:0;z-index:40;background:#8a1f1f;color:#fff;text-align:center;
 padding:10px 16px calc(10px + env(safe-area-inset-bottom));font-size:15px}
+#fc-offline a{color:#fff;font-weight:600;text-decoration:underline;display:inline-flex;align-items:center;min-height:44px;margin:-12px 0}
 #fc-toast{top:calc(70px + env(safe-area-inset-top))}
 """
 
-SW_JS = """// Flashcards service worker: only shows a friendly page when the server can't be reached.
-// Nothing else is cached, so every page is always fresh from the server.
-const C='fc-offline-v1';
+SW_JS = """// Flashcards service worker. Everything comes from the server while it can be reached (network
+// first), so nothing goes stale. When it can't be reached:
+// - a page (GET) shows the offline study page (flashcards/offline.py, cached by the offline script in
+//   "fc-shell"), which studies the decks kept offline; without one, the "You're offline" page;
+// - an answer on the study screen (POST /study/<deck>/answer) goes to the offline study page with the
+//   answer, which queues it; other form posts show the "You're offline" page;
+// - card media, the offline page's script and the bundled MathJax come from Cache Storage
+//   (with Range requests answered, which Safari uses for audio).
+const C='fc-offline-v2';
 self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(['/offline','/icon-192.png'])).then(()=>self.skipWaiting()));});
-// Only this worker's own old caches are deleted: the offline copies' media (fc-media:<user>) stays.
+// Only this worker's own old caches are deleted: the offline copies' media (fc-media:<user>) and the
+// offline study page (fc-shell) stay.
 self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k.startsWith('fc-offline-')&&k!==C).map(k=>caches.delete(k)))).then(()=>self.clients.claim()));});
-self.addEventListener('fetch',e=>{if(e.request.mode!=='navigate')return;
- e.respondWith(fetch(e.request).catch(()=>caches.open(C).then(c=>c.match('/offline')).then(r=>r||Response.error())));});
+const OFFLINE_GET=/^\\/(media|static|offline\\/client\\.js|icon-|apple-touch-icon|favicon|manifest\\.json)/;
+async function fromCache(req){const u=new URL(req.url);
+ const r=await caches.match(u.pathname,{ignoreSearch:true})||await caches.match(req,{ignoreSearch:true});
+ if(!r)return Response.error();
+ const range=req.headers.get('range'),m=range&&/^bytes=(\\d*)-(\\d*)$/.exec(range.trim());
+ if(!m||r.status!==200)return r;
+ const buf=await r.arrayBuffer(),n=buf.byteLength;let a=m[1]===''?Math.max(0,n-(+m[2]||0)):+m[1],b=m[1]!==''&&m[2]!==''?Math.min(+m[2],n-1):n-1;
+ if(a>=n||a>b)return new Response('',{status:416,headers:{'Content-Range':'bytes */'+n}});
+ return new Response(buf.slice(a,b+1),{status:206,headers:{'Content-Type':r.headers.get('Content-Type')||'application/octet-stream',
+  'Content-Range':'bytes '+a+'-'+b+'/'+n,'Content-Length':String(b-a+1),'Accept-Ranges':'bytes'}});}
+async function offlinePage(){return await caches.match('/offline/study',{ignoreSearch:true})||
+ await caches.open(C).then(c=>c.match('/offline'))||Response.error();}
+async function offlinePost(copy){const u=new URL(copy.url),m=/^\\/study\\/(\\d+)\\/answer$/.exec(u.pathname);
+ if(m&&await caches.match('/offline/study')){try{const f=await copy.formData();
+  const a={cid:+f.get('card_id'),rating:+f.get('rating'),ms:+f.get('ms')||0,ts:Date.now()};
+  if(a.cid&&a.rating>=1&&a.rating<=4)return Response.redirect(self.location.origin+'/study/'+m[1]+'?fcans='+encodeURIComponent(JSON.stringify(a)),303);}catch(x){}}
+ return await caches.open(C).then(c=>c.match('/offline'))||Response.error();}
+self.addEventListener('fetch',e=>{const req=e.request,u=new URL(req.url);if(u.origin!==self.location.origin)return;
+ if(req.mode!=='navigate'){if(req.method==='GET'&&OFFLINE_GET.test(u.pathname))e.respondWith(fetch(req).catch(()=>fromCache(req)));return;}
+ if(req.method==='GET'){e.respondWith(fetch(req).catch(()=>offlinePage()));return;}
+ const copy=req.clone();e.respondWith(fetch(req).catch(()=>offlinePost(copy)));});
 // Study reminders (flashcards/reminders.py): show the push, and open the app when it is tapped.
 self.addEventListener('push',e=>{let d={};try{d=e.data?e.data.json():{};}catch(x){d={body:e.data?e.data.text():''};}
  e.waitUntil(self.registration.showNotification(d.title||'Flashcards',{body:d.body||'',tag:d.tag||'fc-reminder',
