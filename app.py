@@ -810,7 +810,8 @@ def add_page(request: Request, nt: int = 0, did: int = 0):
     with collection(user) as col:
         model = col.models.get(nt) if nt else col.models.current()
         did = did or col.get_config("curDeck", 1)
-        body = f'<div class="box"><h2 style="margin-top:0">Add card</h2>{note_form(col, model, did)}</div>'
+        body = (f'<div class="box"><div class="row" style="justify-content:space-between"><h2 style="margin:0">Add card</h2>'
+                f'<a class="btn" href="/notetypes/{model["id"]}/cards">Cards…</a></div>{note_form(col, model, did)}</div>')
     return page("Add", body, user, "add", take_flash(request))
 
 async def save_upload(col, upload):
@@ -869,7 +870,10 @@ def edit_page(request: Request, nid: int, back: str = "/browse"):
         cards_box = cards_panel(col, note, f"/edit/{nid}?back={qback}")
     body = f"""<div class="box"><h2 style="margin-top:0">Edit note</h2>{form}
 <form method="post" action="/note/{nid}/delete?back={html.escape(qback)}" onsubmit="return confirm('Delete this note and its cards?')">
-<button class="danger">Delete note</button></form></div>{cards_box}"""
+<button class="danger">Delete note</button></form>
+<p class="row" style="margin-bottom:0"><a class="btn" href="/notetypes/{model['id']}/cards?nid={nid}">Cards…</a>
+<a class="btn" href="/notetypes/{model['id']}/fields">Fields…</a>
+<a class="btn" href="/notetypes/change?nids={nid}&amp;back={html.escape(qback)}">Change note type</a></p></div>{cards_box}"""
     return page("Edit", body, user, "browse", take_flash(request))
 
 def cards_panel(col, note, back):
@@ -1130,7 +1134,8 @@ placeholder="Search (Anki syntax: deck:French is:due tag:verb front:*cat*)"><but
 <option value="">Action…</option><option value="deck">Change deck</option><option value="add_tags">Add tags</option>
 <option value="remove_tags">Remove tags</option><option value="suspend">Suspend</option><option value="unsuspend">Unsuspend</option>
 <option value="flag">Flag</option><option value="due">Set due date</option><option value="reset">Reset to new</option>
-<option value="reposition">Reposition new cards</option><option value="delete">Delete notes</option></select>
+<option value="reposition">Reposition new cards</option><option value="notetype">Change note type</option>
+<option value="delete">Delete notes</option></select>
 <span class="arg row" data-op="deck"><select name="deck" aria-label="Deck">{deck_opts}</select></span>
 <span class="arg row" data-op="add_tags remove_tags"><input type="text" name="tags" placeholder="tags, space separated" aria-label="Tags"></span>
 <span class="arg row" data-op="flag"><select name="flag" aria-label="Flag">{flag_opts}</select></span>
@@ -1277,6 +1282,10 @@ async def browse_bulk(request: Request):
         try:
             cids, nids = bulk_targets(col, form)
             if not cids and not nids: raise ValueError("Nothing selected.")
+            if form.get("op") == "notetype" and not form.get("do_replace"):
+                # Anki's Change Note Type dialog: its own page, which comes back here afterwards.
+                sel = f"q={quote(str(form.get('q', '')))}" if form.get("all") else f"nids={','.join(map(str, nids))}"
+                return RedirectResponse(f"/notetypes/change?{sel}&back={quote(back)}", 303)
             msg = bulk_action(col, form, cids, nids)
         except Exception as e:
             msg = "!" + (str(e) or "That did not work.")
@@ -1357,7 +1366,9 @@ def settings(request: Request):
     with collection(user) as col:
         fsrs = col.get_config("fsrs", True)
     users = load_users()
-    body = f"""<div class="box"><h3 style="margin-top:0">Scheduler</h3><form method="post" action="/settings/fsrs" class="row">
+    body = f"""<div class="box row" style="justify-content:space-between"><h3 style="margin:0">Note types</h3>
+<a class="btn" href="/notetypes">Manage note types</a></div>
+<div class="box"><h3 style="margin-top:0">Scheduler</h3><form method="post" action="/settings/fsrs" class="row">
 <span style="flex:1">FSRS scheduling (Anki's modern algorithm) is <b>{'on' if fsrs else 'off'}</b>.</span>
 <button>{'Turn off (use SM-2)' if fsrs else 'Turn on'}</button></form></div>
 <div class="box"><h3 style="margin-top:0">Change password</h3><form method="post" action="/settings/password">
@@ -1407,3 +1418,5 @@ from flashcards import custom_study  # noqa: E402
 app.include_router(custom_study.router)
 from flashcards import filtered_decks  # noqa: E402
 app.include_router(filtered_decks.router)
+from flashcards import notetypes  # noqa: E402
+app.include_router(notetypes.router)
