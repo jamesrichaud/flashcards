@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # Runs Claude Code repeatedly, one PLAN.md item per run, until the plan is done or time runs out.
+# Everything is wrapped in main() so bash reads the whole file first: a run may edit this script.
+main() {
 # Usage (from the repo folder):  HOURS=9 ./overnight/run.sh
 cd "$(dirname "$0")/.." || exit 1
 mkdir -p logs
@@ -36,3 +38,5 @@ done
 echo "=== finished $(date) ===" | tee -a "$LOG"
 grep -E '^- \[(x|~| )\]' PLAN.md | cut -c1-80 | tee -a "$LOG"
 docker compose up -d --build >> "$LOG" 2>&1 && echo "App rebuilt and running on http://localhost:8000" | tee -a "$LOG"
+}
+main "$@"; exit

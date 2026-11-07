@@ -62,6 +62,8 @@ with sync_playwright() as p:
         pg.evaluate(PEN, ["pointermove", "touch", 300, 60, 21]); pg.evaluate(PEN, ["pointerup", "touch", 300, 60, 21])
         assert pg.evaluate("WB.strokes().length") == 2, "finger drew after pen use"
         # A still tap goes through: tap zones show the answer, drawing stays.
+        # (Touches within 0.5 s of the pen lifting are ignored on purpose: palm rejection.)
+        pg.wait_for_timeout(600)
         pg.evaluate(PEN, ["pointerdown", "touch", 200, 100, 22]); pg.evaluate(PEN, ["pointerup", "touch", 200, 100, 22])
         pg.wait_for_timeout(500)
         assert pg.is_visible("#btns"), "tap through the whiteboard didn't show the answer"
