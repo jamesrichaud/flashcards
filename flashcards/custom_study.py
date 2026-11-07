@@ -190,30 +190,3 @@ async def custom_save(request: Request, did: int):
     core.set_flash(request, "Custom study session created.")
     return RedirectResponse(f"/deck/{new_did}", 303)
 
-
-# Filtered decks made by custom study need Rebuild and Empty, as on Anki's overview.
-@router.post("/deck/{did}/rebuild")
-def deck_rebuild(request: Request, did: int):
-    user = core.current_user(request)
-    if not user: return core.need_login(request)
-    with core.collection(user) as col:
-        deck = col.decks.get(did, default=False)
-        if deck and deck.get("dyn"):
-            try:
-                n = col.sched.rebuild_filtered_deck(did).count
-                core.set_flash(request, f"Deck rebuilt: {n} cards.")
-            except Exception as e:
-                core.set_flash(request, "!" + str(e))
-    return RedirectResponse(f"/deck/{did}", 303)
-
-
-@router.post("/deck/{did}/empty")
-def deck_empty(request: Request, did: int):
-    user = core.current_user(request)
-    if not user: return core.need_login(request)
-    with core.collection(user) as col:
-        deck = col.decks.get(did, default=False)
-        if deck and deck.get("dyn"):
-            col.sched.empty_filtered_deck(did)
-            core.set_flash(request, "Deck emptied. Its cards are back in their home decks.")
-    return RedirectResponse(f"/deck/{did}", 303)

@@ -10,7 +10,7 @@ If an item fails twice, mark it `- [~]` with a one-line reason under it and move
 - [x] Study screen parity: "Again" re-shows in the same session as in Anki; Edit returns to the same card; type-in-the-answer cards ({{type:Field}}) with an input box and Anki's comparison output; play/replay audio (R key); auto-play audio as Anki does; show "card is a leech" notice when Anki tags a leech.
 - [x] Deck options parity: all main Anki deck option fields (learning steps, relearning steps, graduating interval, easy interval, insertion order, new/review order and mix, bury siblings options, leech threshold and action, maximum interval, starting ease, easy bonus, hard interval, FSRS desired retention, FSRS parameters + "Optimize" button using the engine's FSRS optimizer). Presets: create, rename, clone, delete, choose preset per deck. Apply to subdecks.
 - [x] Custom study (Anki's dialog): increase today's new/review limit, review forgotten cards, review ahead, preview new cards, study by card state or tag. Uses the engine's custom study call.
-- [ ] Filtered decks: create/edit/rebuild/empty with search, limit, order, reschedule option, second filter.
+- [x] Filtered decks: create/edit/rebuild/empty with search, limit, order, reschedule option, second filter.
 
 ## Content
 - [ ] Note type manager: list, add (from stock types: Basic, Basic+reversed, Basic optional reversed, Basic type-in, Cloze, Image Occlusion), rename, delete, field manager (add, rename, reorder, delete, sort field, font), card template editor (front/back HTML, styling CSS, add/remove card types) with live preview. Change note type of existing notes.

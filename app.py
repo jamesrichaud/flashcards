@@ -189,7 +189,8 @@ def decks(request: Request):
 <th class="n">Due</th></tr>{''.join(rows) or '<tr><td colspan=4 class="muted">No decks yet.</td></tr>'}</table></div>
 <div class="box"><form method="post" action="/deck/new" class="row">
 <input name="name" placeholder="New deck name (use :: for subdecks)" style="flex:1" required>
-<button>Create deck</button></form></div>"""
+<button>Create deck</button></form>
+<div class="row" style="margin-top:10px"><a class="btn" href="/filtered/new">Create filtered deck</a></div></div>"""
     return page("Decks", body, user, "decks", take_flash(request))
 
 @app.post("/deck/new")
@@ -221,6 +222,7 @@ def deck_overview(request: Request, did: int):
     else:
         opts = f"""<div class="box row"><div style="flex:1;min-width:200px"><h3 style="margin:0">Filtered deck</h3>
 <span class="muted" style="font-size:14px">Cards are borrowed from their home decks until the deck is emptied.</span></div>
+<a class="btn" href="/deck/{did}/filtered">Options</a>
 <form method="post" action="/deck/{did}/rebuild"><button>Rebuild</button></form>
 <form method="post" action="/deck/{did}/empty"><button>Empty</button></form></div>"""
     body = f"""<div class="box" style="text-align:center"><h2 style="margin-top:0">{html.escape(deck['name'])}</h2>
@@ -1112,6 +1114,7 @@ placeholder="Search (Anki syntax: deck:French is:due tag:verb front:*cat*)"><but
 <div class="row" style="margin-top:10px;justify-content:space-between">
 <span class="muted">{total} {unit}{(' · ' + html.escape(err)) if err else ''}</span>
 <div class="row"><div class="row seg" role="group" aria-label="Show">{seg}</div>
+<a class="btn" href="/filtered/new?search={quote(q)}" title="Create a filtered deck from this search">Filtered deck</a>
 <details class="panel"><summary class="btn">Columns ▾</summary></details></div></div>
 <form id="colsform" method="post" action="/browse/columns" style="display:none;margin-top:10px">
 <input type="hidden" name="mode" value="{mode}"><input type="hidden" name="back" value="{html.escape(here)}">
@@ -1402,3 +1405,5 @@ from flashcards import deck_options  # noqa: E402  (imports helpers from this mo
 app.include_router(deck_options.router)
 from flashcards import custom_study  # noqa: E402
 app.include_router(custom_study.router)
+from flashcards import filtered_decks  # noqa: E402
+app.include_router(filtered_decks.router)
