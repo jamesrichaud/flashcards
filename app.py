@@ -16,6 +16,9 @@ from anki.collection import (Collection, ImportAnkiPackageRequest,
                              ExportAnkiPackageOptions, DeckIdLimit)
 from anki.scheduler.v3 import CardAnswer
 from anki.sound import SoundOrVideoTag
+from anki.browser import BrowserConfig
+from anki.config import Config
+from anki.utils import ids2str
 
 DATA = os.environ.get("DATA_DIR", os.path.join(os.path.dirname(__file__), "data"))
 os.makedirs(DATA, exist_ok=True)
@@ -787,57 +790,338 @@ def strip_html(s):
     s = re.sub(r"\[sound:[^\]]+\]", "🔊", s)
     return html.unescape(re.sub(r"<[^>]+>", " ", s)).strip()
 
-# Row tints like Anki's browser: suspended = yellow, flagged = flag colour, marked = purple-ish.
-BROWSE_ROW_CSS = "tr.susp td{background:rgba(240,200,40,.16)}tr.marked td{background:rgba(142,68,236,.10)}" + "".join(
+# Row tints like Anki's browser: suspended = yellow, flagged = flag colour, marked = purple-ish, buried = grey.
+BROWSE_ROW_CSS = ("tr.susp td{background:rgba(240,200,40,.16)}tr.marked td{background:rgba(142,68,236,.10)}"
+                  "tr.buried td{background:rgba(128,128,128,.14)}") + "".join(
     f"tr.flag{n} td{{background:{c}22}}" for n, _, c in FLAGS[1:])
+# Engine row colours (BrowserRow.Color) -> CSS class.
+ROW_COLOR_CLASS = {1: "marked", 2: "susp", 10: "buried", **{2 + n: f"flag{n}" for n in range(1, 8)}}
+# Columns shown until the user picks their own (Anki's defaults plus the scheduling numbers).
+BROWSE_DEFAULT_COLS = {
+    "cards": ["noteFld", "template", "deck", "cardDue", "cardIvl", "cardEase", "cardReps", "cardLapses"],
+    "notes": ["noteFld", "note", "deck", "cardDue", "cardIvl", "cardEase", "cardReps", "cardLapses", "noteTags"],
+}
+BROWSE_PER_PAGE = 100
+BROWSE_MODE_KEY = "flashcardsBrowseMode"   # our own key: this app defaults to notes mode
+
+def browse_mode(col, mode=""):
+    """Cards or notes mode. The engine's browser_row_for_id reads Anki's notes-mode flag, so keep it in sync."""
+    if mode in ("cards", "notes"):
+        if col.get_config(BROWSE_MODE_KEY, "notes") != mode:
+            col.set_config(BROWSE_MODE_KEY, mode)
+    else:
+        mode = col.get_config(BROWSE_MODE_KEY, "notes")
+    if col.get_config_bool(Config.Bool.BROWSER_TABLE_SHOW_NOTES_MODE) != (mode == "notes"):
+        col.set_config_bool(Config.Bool.BROWSER_TABLE_SHOW_NOTES_MODE, mode == "notes")
+    return mode
+
+def browse_columns(col, notes):
+    """Active columns for the mode, synced into the engine so browser_row_for_id uses them."""
+    key = BrowserConfig.active_columns_key(notes)
+    valid = {c.key for c in col.all_browser_columns()}
+    cols = [c for c in (col.get_config(key, None) or []) if c in valid]
+    if not cols:
+        cols = BROWSE_DEFAULT_COLS["notes" if notes else "cards"]
+        (col.set_browser_note_columns if notes else col.set_browser_card_columns)(cols)
+    else:
+        (col.load_browser_note_columns if notes else col.load_browser_card_columns)()
+    return cols
+
+def browse_search(col, q, notes, sort="", rev=None):
+    """Run the search sorted like Anki's browser. Sort column/direction are kept in Anki's own config keys."""
+    skey, rkey = BrowserConfig.sort_column_key(notes), BrowserConfig.sort_backwards_key(notes)
+    if sort and col.get_browser_column(sort):
+        if col.get_config(skey, None) != sort: col.set_config(skey, sort)
+        if rev is not None and bool(col.get_config(rkey, False)) != rev: col.set_config(rkey, rev)
+    sort = col.get_config(skey, "noteFld")
+    column = col.get_browser_column(sort)
+    sortable = column is not None and (column.sorting_notes if notes else column.sorting_cards)
+    backwards = bool(col.get_config(rkey, False))
+    find = col.find_notes if notes else col.find_cards
+    ids = list(find(q, order=column if sortable else False, reverse=backwards))
+    return ids, (sort if sortable else ""), backwards
+
+def browse_url(q="", page_no=0, **extra):
+    params = [("q", q)] + ([("page_no", page_no)] if page_no else []) + [(k, v) for k, v in extra.items() if v != ""]
+    return "/browse?" + "&".join(f"{k}={quote(str(v), safe='')}" for k, v in params)
+
+def note_state(col, cards):
+    """State text, flag and row class for a note, summarising its cards."""
+    if not cards: return "", 0, ""
+    states = [card_state(c) for c in cards]
+    nsusp = states.count("Suspended")
+    text, cls = states[0], ""
+    if nsusp == len(cards): text, cls = "Suspended", "susp"
+    elif nsusp: text = f"{states[0] if states[0] != 'Suspended' else 'New'} · {nsusp} suspended"
+    return text, next((c.user_flag() for c in cards if c.user_flag()), 0), cls
 
 @app.get("/browse", response_class=HTMLResponse)
-def browse(request: Request, q: str = "", page_no: int = 0):
+def browse(request: Request, q: str = "", page_no: int = 0, mode: str = "", sort: str = "", rev: str = ""):
     user = current_user(request)
     if not user: return need_login(request)
-    per = 100
+    per = BROWSE_PER_PAGE
     with collection(user) as col:
+        mode = browse_mode(col, mode)
+        notes = mode == "notes"
+        cols = browse_columns(col, notes)
+        all_cols = {c.key: c for c in col.all_browser_columns()}
         try:
-            nids = list(reversed(col.find_notes(q)))
+            ids, sort, backwards = browse_search(col, q, notes, sort, (rev == "1") if rev in ("0", "1") else None)
             err = ""
         except Exception as e:
-            nids, err = [], str(e)
-        total = len(nids)
+            ids, err, backwards = [], str(e), False
+        total = len(ids)
+        page_no = max(0, min(page_no, (total - 1) // per if total else 0))
+        here = browse_url(q, page_no)
+        qback = html.escape(quote(here, safe="/"))
         rows = []
-        for nid in nids[page_no * per:(page_no + 1) * per]:
-            n = col.get_note(nid)
-            cards = n.cards()
-            deck = col.decks.name(cards[0].did) if cards else ""
-            due, flag, cls = "", 0, ""
-            if cards:
-                states = [card_state(c) for c in cards]
-                nsusp = states.count("Suspended")
-                due = states[0]
-                if nsusp == len(cards): due, cls = "Suspended", "susp"
-                elif nsusp: due = f"{states[0] if states[0] != 'Suspended' else 'New'} · {nsusp} suspended"
-                flag = next((c.user_flag() for c in cards if c.user_flag()), 0)
-            marked = n.has_tag("marked")
-            if flag: cls += f" flag{flag}"
-            elif marked: cls += " marked"
-            rows.append(f"""<tr class="{cls.strip()}"><td><a class="deck" href="/edit/{nid}?back={quote('/browse?q=' + q, safe='/')}">
-{html.escape(strip_html(n.fields[0])[:90]) or '(empty)'}</a><span class="muted" style="font-size:14px">
-{html.escape(strip_html(n.fields[1])[:90]) if len(n.fields) > 1 else ''}</span></td>
-<td class="muted" style="font-size:14px">{html.escape(deck)}</td><td class="muted state" style="font-size:14px;white-space:nowrap">
-{flag_dot(flag)}{' <span title="Marked" style="color:#c98a16">★</span>' if marked else ''} {due}</td>
-<td>{f'<a class="info-link" title="Card info" aria-label="Card info" href="/card/{cards[0].id}/info?back={html.escape(quote("/browse?q=" + q, safe="/"))}">ⓘ</a>' if cards else ''}</td></tr>""")
+        for id_ in ids[page_no * per:(page_no + 1) * per]:
+            try:
+                cells, color, _, _ = col.browser_row_for_id(id_)
+                cells = [re.sub(r"[⁨⁩]", "", t) for t, _, _ in cells]
+            except Exception:   # removed between search and render
+                continue
+            if notes:
+                n = col.get_note(id_)
+                cards = n.cards()
+                state, flag, cls = note_state(col, cards)
+                marked, nid, info_cid = n.has_tag("marked"), id_, (cards[0].id if cards else 0)
+                if flag: cls += f" flag{flag}"
+                elif marked: cls += " marked"
+            else:
+                card = col.get_card(id_)
+                state, flag, nid, info_cid = card_state(card), card.user_flag(), card.nid, id_
+                marked = "marked" in [t.lower() for t in card.note().tags]
+                cls = ROW_COLOR_CLASS.get(color, "")
+            tds = []
+            for i, (key, text) in enumerate(zip(cols, cells)):
+                right = all_cols[key].alignment == 1 if key in all_cols else False
+                txt = html.escape(text[:120])
+                if i == 0:
+                    txt = f'<a class="deck" href="/edit/{nid}?back={qback}">{txt or "(empty)"}</a>'
+                tds.append(f'<td class="{"num" if right else ""}">{txt}</td>')
+            info = (f'<a class="info-link" title="Card info" aria-label="Card info" '
+                    f'href="/card/{info_cid}/info?back={qback}">ⓘ</a>') if info_cid else ""
+            rows.append(f"""<tr class="{cls.strip()}"><td class="sel"><input type="checkbox" name="ids" value="{id_}"
+aria-label="Select"></td>{''.join(tds)}<td class="muted state">{flag_dot(flag)}{' <span title="Marked" style="color:#c98a16">★</span>' if marked else ''} {state}</td><td>{info}</td></tr>""")
+        heads = []
+        for key in cols:
+            c = all_cols.get(key)
+            label = (c.notes_mode_label if notes else c.cards_mode_label) if c else key
+            can_sort = c is not None and (c.sorting_notes if notes else c.sorting_cards)
+            if not can_sort:
+                heads.append(f"<th>{html.escape(label)}</th>"); continue
+            on = key == sort
+            # The engine sorts each column its own natural way; "backwards" flips it.
+            asc = (c.sorting_notes if notes else c.sorting_cards) == 1
+            arrow = (" ▼" if asc == backwards else " ▲") if on else ""
+            url = browse_url(q, 0, sort=key, rev=("0" if backwards else "1") if on else "0")
+            heads.append(f'<th class="{"num" if c.alignment == 1 else ""}"><a class="sort{" on" if on else ""}" '
+                         f'href="{html.escape(url)}">{html.escape(label)}{arrow}</a></th>')
+        decks = sorted(col.decks.all_names_and_ids(include_filtered=False), key=lambda d: d.name)
+        fields = sorted({f["name"] for m in col.models.all() for f in m["flds"]}, key=str.lower)
+        col_opts = "".join(
+            f'<label class="chk"><input type="checkbox" name="cols" value="{c.key}" {"checked" if c.key in cols else ""}>'
+            f'{html.escape(c.notes_mode_label if notes else c.cards_mode_label)}</label>'
+            for c in sorted(all_cols.values(), key=lambda c: (c.notes_mode_label if notes else c.cards_mode_label)))
     nav = ""
     if total > per:
         last = (total - 1) // per
-        nav = '<div class="row">' + (f'<a class="btn" href="/browse?q={html.escape(q)}&page_no={page_no - 1}">← Prev</a>' if page_no else "") \
+        nav = '<div class="row">' + (f'<a class="btn" href="{html.escape(browse_url(q, page_no - 1))}">← Prev</a>' if page_no else "") \
             + f'<span class="muted">Page {page_no + 1} of {last + 1}</span>' \
-            + (f'<a class="btn" href="/browse?q={html.escape(q)}&page_no={page_no + 1}">Next →</a>' if page_no < last else "") + "</div>"
-    body = f"""<div class="box"><form class="row"><input name="q" value="{html.escape(q)}" style="flex:1"
+            + (f'<a class="btn" href="{html.escape(browse_url(q, page_no + 1))}">Next →</a>' if page_no < last else "") + "</div>"
+    unit = "notes" if notes else "cards"
+    seg = "".join(f'<a class="btn{" primary" if m == mode else ""}" href="{html.escape(browse_url(q, 0, mode=m))}">{m.title()}</a>'
+                  for m in ("cards", "notes"))
+    deck_opts = "".join(f'<option value="{d.id}">{html.escape(d.name)}</option>' for d in decks)
+    flag_opts = "".join(f'<option value="{n}">{t}</option>' for n, t, _ in FLAGS)
+    field_opts = "".join(f'<option value="{html.escape(f)}">{html.escape(f)}</option>' for f in fields)
+    eq = html.escape(q)
+    body = f"""<style>main{{max-width:1240px}}{BROWSE_ROW_CSS}
+.info-link{{display:inline-flex;align-items:center;justify-content:center;min-width:44px;min-height:44px;font-size:20px;
+color:var(--muted);text-decoration:none;border-radius:10px}}.info-link:hover{{background:var(--bg)}}
+.btable td,.btable th{{padding:8px 8px;font-size:15px;vertical-align:middle}}.btable td.num,.btable th.num{{text-align:right;
+white-space:nowrap;font-variant-numeric:tabular-nums}}.btable .state{{font-size:14px;white-space:nowrap}}
+.btable td.sel,.btable th.sel{{width:44px;padding:0 4px}}.sel input,.chk input{{width:22px;height:22px;margin:0;accent-color:var(--accent)}}
+a.sort{{color:var(--muted);text-decoration:none}}a.sort.on{{color:var(--ink);font-weight:600}}
+.seg{{gap:0}}.seg .btn{{border-radius:0}}.seg .btn:first-child{{border-radius:10px 0 0 10px}}.seg .btn:last-child{{border-radius:0 10px 10px 0}}
+.chk{{display:flex;gap:8px;align-items:center;margin:0;padding:8px 6px;color:var(--ink);font-size:15px;min-height:44px}}
+.colgrid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:0 12px}}
+details.panel>summary{{cursor:pointer;list-style:none;display:inline-block}}details.panel>summary::-webkit-details-marker{{display:none}}
+.bar{{position:sticky;top:62px;z-index:4}}.arg{{display:none}}.arg.show{{display:flex}}.bar select,.bar input[type=text],
+.bar input[type=number]{{width:auto;min-height:44px}}</style>
+<div class="box"><form class="row" action="/browse"><input name="q" value="{eq}" style="flex:1;min-width:220px"
 placeholder="Search (Anki syntax: deck:French is:due tag:verb front:*cat*)"><button>Search</button></form>
-<p class="muted" style="margin-bottom:0">{total} notes{(' · ' + html.escape(err)) if err else ''}</p></div>
-<style>{BROWSE_ROW_CSS}.info-link{{display:inline-flex;align-items:center;justify-content:center;min-width:44px;
-min-height:44px;font-size:20px;color:var(--muted);text-decoration:none;border-radius:10px}}.info-link:hover{{background:var(--bg)}}</style>
-<div class="box"><table><tr><th>Note</th><th>Deck</th><th>State</th><th></th></tr>{''.join(rows)}</table></div>{nav}"""
+<div class="row" style="margin-top:10px;justify-content:space-between">
+<span class="muted">{total} {unit}{(' · ' + html.escape(err)) if err else ''}</span>
+<div class="row"><div class="row seg" role="group" aria-label="Show">{seg}</div>
+<details class="panel"><summary class="btn">Columns ▾</summary></details></div></div>
+<form id="colsform" method="post" action="/browse/columns" style="display:none;margin-top:10px">
+<input type="hidden" name="mode" value="{mode}"><input type="hidden" name="back" value="{html.escape(here)}">
+<div class="colgrid">{col_opts}</div><p class="row" style="margin-bottom:0"><button class="primary">Save columns</button>
+<button name="reset" value="1">Default columns</button></p></form></div>
+<form id="bulk" method="post" action="/browse/bulk">
+<input type="hidden" name="mode" value="{mode}"><input type="hidden" name="q" value="{eq}">
+<input type="hidden" name="back" value="{html.escape(here)}">
+<div class="box bar"><div class="row">
+<b id="nsel">0 selected</b>
+<label class="chk" style="padding:0 6px"><input type="checkbox" name="all" value="1" id="allq">All {total} {unit} in this search</label>
+<select name="op" id="op" aria-label="Action">
+<option value="">Action…</option><option value="deck">Change deck</option><option value="add_tags">Add tags</option>
+<option value="remove_tags">Remove tags</option><option value="suspend">Suspend</option><option value="unsuspend">Unsuspend</option>
+<option value="flag">Flag</option><option value="due">Set due date</option><option value="reset">Reset to new</option>
+<option value="reposition">Reposition new cards</option><option value="delete">Delete notes</option></select>
+<span class="arg row" data-op="deck"><select name="deck" aria-label="Deck">{deck_opts}</select></span>
+<span class="arg row" data-op="add_tags remove_tags"><input type="text" name="tags" placeholder="tags, space separated" aria-label="Tags"></span>
+<span class="arg row" data-op="flag"><select name="flag" aria-label="Flag">{flag_opts}</select></span>
+<span class="arg row" data-op="due"><input type="text" name="days" placeholder="days: 0, 1, 3-7, 5!" aria-label="Due in days" style="width:170px"></span>
+<span class="arg row" data-op="reposition"><label class="chk" style="padding:0">Start <input type="number" name="start" value="0" min="0" style="width:90px;height:auto"></label>
+<label class="chk" style="padding:0">Step <input type="number" name="step" value="1" min="1" style="width:80px;height:auto"></label>
+<label class="chk"><input type="checkbox" name="randomize" value="1">Randomize</label>
+<label class="chk"><input type="checkbox" name="shift" value="1">Shift existing</label></span>
+<button class="primary" id="apply">Apply</button></div>
+<details class="panel" style="margin-top:10px"><summary class="btn">Find and replace ▾</summary>
+<div class="row" style="margin-top:10px"><input type="text" name="find" placeholder="Find" aria-label="Find" style="flex:1;min-width:160px">
+<input type="text" name="replace" placeholder="Replace with" aria-label="Replace with" style="flex:1;min-width:160px">
+<select name="field" aria-label="In"><option value="">All fields</option><option value="__tags__">Tags</option>{field_opts}</select>
+<label class="chk"><input type="checkbox" name="regex" value="1">Regex</label>
+<label class="chk"><input type="checkbox" name="match_case" value="1">Match case</label>
+<button name="do_replace" value="1">Replace</button></div>
+<p class="muted" style="font-size:14px;margin-bottom:0">Works on the selected notes (or every note in the search when “All” is ticked).</p></details></div>
+<div class="box" style="overflow-x:auto;padding:8px"><table class="btable"><tr><th class="sel"><input type="checkbox" id="selall"
+aria-label="Select all on this page"></th>{''.join(heads)}<th>State</th><th></th></tr>{''.join(rows)}</table></div></form>{nav}
+<script>
+const bulk=document.getElementById('bulk'),op=document.getElementById('op'),allq=document.getElementById('allq');
+const boxes=()=>[...bulk.querySelectorAll('input[name=ids]')];
+function count(){{const n=allq.checked?{total}:boxes().filter(b=>b.checked).length;
+ document.getElementById('nsel').textContent=n+' selected';}}
+document.getElementById('selall').onchange=e=>{{boxes().forEach(b=>b.checked=e.target.checked);count();}};
+bulk.addEventListener('change',e=>{{if(e.target.name==='ids'||e.target===allq)count();}});
+op.onchange=()=>document.querySelectorAll('.arg').forEach(a=>a.classList.toggle('show',a.dataset.op.split(' ').includes(op.value)));
+bulk.onsubmit=e=>{{const n=allq.checked?{total}:boxes().filter(b=>b.checked).length;
+ const rep=e.submitter&&e.submitter.name==='do_replace';
+ if(!n){{e.preventDefault();alert('Select some {unit} first (tick the boxes, or “All”).');return;}}
+ if(!rep&&!op.value){{e.preventDefault();alert('Choose an action.');return;}}
+ if(!rep&&op.value==='delete'&&!confirm('Delete the notes of the '+n+' selected {unit}? This removes all their cards.'))e.preventDefault();
+ if(!rep&&op.value==='reset'&&!confirm('Reset '+n+' {unit} to new? Review history is kept.'))e.preventDefault();}};
+bulk.querySelectorAll('input[name=find],input[name=replace]').forEach(i=>i.addEventListener('keydown',e=>{{
+ if(e.key==='Enter'){{e.preventDefault();bulk.querySelector('button[name=do_replace]').click();}}}}));
+const cp=document.querySelector('details.panel');cp.ontoggle=()=>document.getElementById('colsform').style.display=cp.open?'block':'none';
+</script>"""
     return page("Browse", body, user, "browse", take_flash(request))
+
+def safe_back(back, default="/browse"):
+    return back if back.startswith("/") and not back.startswith("//") else default
+
+@app.post("/browse/columns")
+async def browse_set_columns(request: Request):
+    user = current_user(request)
+    if not user: return need_login(request)
+    form = await request.form()
+    notes = form.get("mode") == "notes"
+    with collection(user) as col:
+        valid = {c.key for c in col.all_browser_columns()}
+        cols = [c for c in form.getlist("cols") if c in valid]
+        if form.get("reset") or not cols:
+            cols = BROWSE_DEFAULT_COLS["notes" if notes else "cards"]
+        (col.set_browser_note_columns if notes else col.set_browser_card_columns)(cols)
+    set_flash(request, "Columns saved.")
+    return RedirectResponse(safe_back(str(form.get("back", ""))), 303)
+
+def bulk_targets(col, form):
+    """(card ids, note ids) the bulk action applies to: the ticked rows, or the whole search."""
+    notes = form.get("mode") == "notes"
+    if form.get("all"):
+        q = str(form.get("q", ""))
+        ids = list(col.find_notes(q) if notes else col.find_cards(q))
+    else:
+        ids = [int(i) for i in form.getlist("ids") if str(i).isdigit()]
+    if not ids: return [], []
+    if notes:
+        nids = col.db.list(f"select id from notes where id in {ids2str(ids)}")
+        cids = col.db.list(f"select id from cards where nid in {ids2str(nids)}")
+    else:
+        cids = col.db.list(f"select id from cards where id in {ids2str(ids)}")
+        nids = col.db.list(f"select distinct nid from cards where id in {ids2str(cids)}")
+    return cids, nids
+
+def bulk_action(col, form, cids, nids):
+    """Run one of the browser's bulk actions through the engine; returns a short message."""
+    plural = lambda n, w: f"{n} {w}{'' if n == 1 else 's'}"
+    if form.get("do_replace"):
+        find, repl = str(form.get("find", "")), str(form.get("replace", ""))
+        if not find: raise ValueError("Enter the text to find.")
+        regex, case = bool(form.get("regex")), bool(form.get("match_case"))
+        field = str(form.get("field", ""))
+        if regex:
+            try: re.compile(find)
+            except re.error as e: raise ValueError(f"Bad regular expression: {e}")
+        if field == "__tags__":
+            n = col.tags.find_and_replace(nids, find, repl, regex, case).count
+        else:
+            n = col.find_and_replace(note_ids=nids, search=find, replacement=repl, regex=regex,
+                                     field_name=field or None, match_case=case).count
+        return f"{plural(n, 'note')} updated."
+    op = str(form.get("op", ""))
+    if op == "deck":
+        did = int(form.get("deck", 0) or 0)
+        if not col.decks.get(did, default=False) or col.decks.is_filtered(did):
+            raise ValueError("Choose a normal deck.")
+        col.set_deck(cids, did)
+        return f"Moved {plural(len(cids), 'card')} to {col.decks.name(did)}."
+    if op in ("add_tags", "remove_tags"):
+        tags = " ".join(str(form.get("tags", "")).split())
+        if not tags: raise ValueError("Enter one or more tags.")
+        if op == "add_tags":
+            n = col.tags.bulk_add(nids, tags).count; return f"Tags added to {plural(n, 'note')}."
+        n = col.tags.bulk_remove(nids, tags).count; return f"Tags removed from {plural(n, 'note')}."
+    if op == "suspend":
+        col.sched.suspend_cards(cids); return f"{plural(len(cids), 'card')} suspended."
+    if op == "unsuspend":
+        col.sched.unsuspend_cards(cids); return f"{plural(len(cids), 'card')} unsuspended."
+    if op == "flag":
+        flag = int(form.get("flag", 0) or 0)
+        if not 0 <= flag <= 7: raise ValueError("Unknown flag.")
+        col.set_user_flag_for_cards(flag, cids)
+        return f"Flag {FLAG_NAME[flag].lower()} set on {plural(len(cids), 'card')}." if flag else "Flags removed."
+    if op == "due":
+        days = str(form.get("days", "")).strip().replace(" ", "")
+        if not re.fullmatch(r"\d+(-\d+)?!?", days):
+            raise ValueError("Due date: enter days like 0 (today), 1, 3-7, or 5! to also set the interval.")
+        col.sched.set_due_date(cids, days)
+        return f"Due date set for {plural(len(cids), 'card')}."
+    if op == "reset":
+        col.sched.schedule_cards_as_new(cids, restore_position=True, reset_counts=False)
+        return f"{plural(len(cids), 'card')} reset to new."
+    if op == "reposition":
+        new = col.db.list(f"select id from cards where type=0 and id in {ids2str(cids)} order by due, ord")
+        if not new: raise ValueError("Only new cards can be repositioned.")
+        start, step = int(form.get("start", 0) or 0), int(form.get("step", 1) or 1)
+        if start < 0 or step < 1: raise ValueError("Start must be 0 or more and step 1 or more.")
+        n = col.sched.reposition_new_cards(new, starting_from=start, step_size=step,
+                                           randomize=bool(form.get("randomize")),
+                                           shift_existing=bool(form.get("shift"))).count
+        return f"{plural(n, 'new card')} repositioned."
+    if op == "delete":
+        n = col.remove_notes(nids).count
+        return f"{plural(n, 'note')} deleted."
+    raise ValueError("Choose an action.")
+
+@app.post("/browse/bulk")
+async def browse_bulk(request: Request):
+    user = current_user(request)
+    if not user: return need_login(request)
+    form = await request.form()
+    back = safe_back(str(form.get("back", "")))
+    with collection(user) as col:
+        try:
+            cids, nids = bulk_targets(col, form)
+            if not cids and not nids: raise ValueError("Nothing selected.")
+            msg = bulk_action(col, form, cids, nids)
+        except Exception as e:
+            msg = "!" + (str(e) or "That did not work.")
+    set_flash(request, msg)
+    return RedirectResponse(back, 303)
 
 # ---------- import ----------
 @app.get("/import", response_class=HTMLResponse)
