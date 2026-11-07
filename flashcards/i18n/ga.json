@@ -32,6 +32,7 @@
  "Action": "Gníomh",
  "Action…": "Gníomh…",
  "Add": "Cuir leis",
+ "Add a cloze like {{c1::this}} to one of the fields.": "Cuir cloze mar {{c1::seo}} i gceann de na réimsí.",
  "Add another person": "Cuir duine eile leis",
  "Add anyway": "Cuir leis mar sin féin",
  "Add card": "Cuir cárta leis",
@@ -66,6 +67,7 @@
   "Cuireadh {n} gcárta leis.",
   "Cuireadh {n} cárta leis."
  ],
+ "Added. It will be saved on the server when the connection is back.": "Curtha leis. Sábhálfar ar an bhfreastalaí é nuair a bheidh an nasc ar ais.",
  "Advanced (SM-2)": "Ardleibhéal (SM-2)",
  "Advanced Copy Fields": "Cóipeáil Réimsí Ardleibhéil",
  "After this, reviews and new cards from every device are merged again as usual.": "Ina dhiaidh seo, cumasctar athbhreithnithe agus cártaí nua ó gach gléas arís mar is gnáth.",
@@ -115,6 +117,7 @@
  "Average time": "Meán-am",
  "Average time per day": "Meán-am in aghaidh an lae",
  "Back": "Cúl",
+ "Back online: everything studied offline was saved.": "Ar líne arís: sábháladh gach rud a staidéaraíodh as líne.",
  "Back preview": "Réamhamharc an chúil",
  "Back template": "Teimpléad an chúil",
  "Back to add-ons": "Ar ais chuig na breiseáin",
@@ -234,6 +237,7 @@
  "Cloze note types have one card type; each cloze number makes a card.": "Tá cineál cárta amháin ag cineálacha nóta cloze; déanann gach uimhir cloze cárta.",
  "Cloze {n}": "Cloze {n}",
  "Cloze: select text and press {new} (Ctrl+Shift+C) for a new card, {same} (Ctrl+Shift+Alt+C) to add to the same card. Or type {example}.": "Cloze: roghnaigh téacs agus brúigh {new} (Ctrl+Shift+C) le haghaidh cárta nua, {same} (Ctrl+Shift+Alt+C) chun é a chur leis an gcárta céanna. Nó clóscríobh {example}.",
+ "Cloze: type {{c1::the hidden text}}; use c2, c3 … for more cards.": "Cloze: clóscríobh {{c1::an téacs i bhfolach}}; úsáid c2, c3 … le haghaidh tuilleadh cártaí.",
  "Collapse by default": "Laghdaigh de réir réamhshocraithe",
  "Collapse {name}": "Laghdaigh {name}",
  "Collection replaced with {name}: {n} note.": [
@@ -319,6 +323,7 @@
  "Deck: {name}": "Paca: {name}",
  "Decks": "Pacaí",
  "Default columns": "Colúin réamhshocraithe",
+ "Default deck": "Deic réamhshocraithe",
  "Delete": "Scrios",
  "Delete card type": "Scrios an cineál cárta",
  "Delete deck": "Scrios an paca",
@@ -760,11 +765,11 @@
  "Only new cards can be repositioned.": "Ní féidir ach cártaí nua a athshuí.",
  "Only pictures, audio and video can be added.": "Ní féidir ach pictiúir, fuaim agus físeán a chur leis.",
  "Only sent when cards are due, at most once a day\n(“{example}”). Time zone: {tz} (set from this device when you save).": "Ní sheoltar é ach nuair atá cártaí dlite, uair sa lá ar a mhéad\n(“{example}”). Crios ama: {tz} (socraithe ón ngléas seo nuair a shábhálann tú).",
- "Only studying works without a connection. Browse, Add and the other pages need the server.": "Ní oibríonn ach staidéar gan cheangal. Teastaíonn an freastalaí ó Brabhsáil, Cuir Leis agus na leathanaigh eile.",
  "Only the first {n} cards are kept offline.": "Ní choinnítear as líne ach an chéad {n} cárta.",
  "Only the first {n} tags are shown.": "Ní thaispeántar ach na chéad chlibeanna ({n}).",
  "Open AnkiWeb shared decks": "Oscail pacaí comhroinnte AnkiWeb",
  "Open in Wiktionary ↗": "Oscail in Wiktionary ↗",
+ "Open the app once with a connection to add notes offline.": "Oscail an aip uair amháin le nasc chun nótaí a chur leis as líne.",
  "Open the sidebar": "Oscail an barra taoibh",
  "Optimize": "Barrfheabhsaigh",
  "Optimize failed: {error}": "Theip ar an mbarrfheabhsú: {error}",
@@ -1039,6 +1044,7 @@
  "Study now": "Déan staidéar anois",
  "Study offline": "Déan staidéar as líne",
  "Study reminders": "Meabhrúcháin staidéir",
+ "Studying and adding notes (text only) work without a connection. Browse and the other pages need the server.": "Oibríonn staidéar agus nótaí a chur leis (téacs amháin) gan nasc. Teastaíonn an freastalaí ó Brabhsáil agus ó na leathanaigh eile.",
  "Styling (shared by all card types)": "Stíliú (roinnte ag gach cineál cárta)",
  "Sun": "Domh",
  "Suspend": "Cuir ar fionraí",
@@ -1103,6 +1109,7 @@
  "Test notification sent. It can take a few seconds to arrive.": "Seoladh fógra tástála. D'fhéadfadh cúpla soicind a thógáil air teacht.",
  "Test the voice": "Tástáil an guth",
  "Test: {title}": "Tástáil: {title}",
+ "Text only. Notes added here are saved on the server when the connection is back.": "Téacs amháin. Sábháiltear na nótaí a chuirtear leis anseo ar an bhfreastalaí nuair a bheidh an nasc ar ais.",
  "That Image Occlusion note no longer exists.": "Níl an nóta Image Occlusion sin ann a thuilleadh.",
  "That backup was not found.": "Níor aimsíodh an cúltaca sin.",
  "That card was not found.": "Níor aimsíodh an cárta sin.",
@@ -1131,6 +1138,7 @@
  "The file is bigger than {mb} MB.": "Tá an comhad níos mó ná {mb} MB.",
  "The file is empty.": "Tá an comhad folamh.",
  "The file is larger than 100 MB.": "Tá an comhad níos mó ná 100 MB.",
+ "The first field is empty.": "Tá an chéad réimse folamh.",
  "The image could not be shown.": "Níorbh fhéidir an íomhá a thaispeáint.",
  "The image file is empty.": "Tá an comhad íomhá folamh.",
  "The image is larger than 100 MB.": "Tá an íomhá níos mó ná 100 MB.",
@@ -1402,6 +1410,13 @@
   "{n} bhfreagra ag fanacht le sioncrónú",
   "{n} freagra ag fanacht le sioncrónú"
  ],
+ "{n} answer was skipped because the card changed on another device.": [
+  "Scipeáladh {n} fhreagra mar d'athraigh an cárta ar ghléas eile.",
+  "Scipeáladh {n} fhreagra mar d'athraigh an cárta ar ghléas eile.",
+  "Scipeáladh {n} fhreagra mar d'athraigh an cárta ar ghléas eile.",
+  "Scipeáladh {n} fhreagra mar d'athraigh an cárta ar ghléas eile.",
+  "Scipeáladh {n} fhreagra mar d'athraigh an cárta ar ghléas eile."
+ ],
  "{n} bytes": [
   "{n} bheart",
   "{n} bheart",
@@ -1504,6 +1519,20 @@
   "{n} nóta",
   "{n} nóta"
  ],
+ "{n} note added offline couldn't be saved (its note type was deleted, or it had no cards).": [
+  "Níorbh fhéidir {n} nóta a cuireadh leis as líne a shábháil (scriosadh a chineál nóta, nó ní raibh cártaí aige).",
+  "Níorbh fhéidir {n} nóta a cuireadh leis as líne a shábháil (scriosadh a chineál nóta, nó ní raibh cártaí aige).",
+  "Níorbh fhéidir {n} nóta a cuireadh leis as líne a shábháil (scriosadh a chineál nóta, nó ní raibh cártaí aige).",
+  "Níorbh fhéidir {n} nóta a cuireadh leis as líne a shábháil (scriosadh a chineál nóta, nó ní raibh cártaí aige).",
+  "Níorbh fhéidir {n} nóta a cuireadh leis as líne a shábháil (scriosadh a chineál nóta, nó ní raibh cártaí aige)."
+ ],
+ "{n} note added offline was saved.": [
+  "Sábháladh {n} nóta a cuireadh leis as líne.",
+  "Sábháladh {n} nóta a cuireadh leis as líne.",
+  "Sábháladh {n} nóta a cuireadh leis as líne.",
+  "Sábháladh {n} nóta a cuireadh leis as líne.",
+  "Sábháladh {n} nóta a cuireadh leis as líne."
+ ],
  "{n} note deleted.": [
   "Scriosadh {n} nóta.",
   "Scriosadh {n} nóta.",
@@ -1525,6 +1554,13 @@
   "Nuashonraíodh {n} nóta.",
   "Nuashonraíodh {n} nóta."
  ],
+ "{n} note waiting to sync": [
+  "{n} nóta ag fanacht le sioncrónú",
+  "{n} nóta ag fanacht le sioncrónú",
+  "{n} nóta ag fanacht le sioncrónú",
+  "{n} nóta ag fanacht le sioncrónú",
+  "{n} nóta ag fanacht le sioncrónú"
+ ],
  "{n} notes": [
   "{n} nóta",
   "{n} nóta",
@@ -1539,6 +1575,13 @@
   "{n} nóta sa Bhrabhsálaí",
   "{n} nóta sa Bhrabhsálaí",
   "{n} nóta sa Bhrabhsálaí"
+ ],
+ "{n} offline answer was saved.": [
+  "Sábháladh {n} fhreagra as líne.",
+  "Sábháladh {n} fhreagra as líne.",
+  "Sábháladh {n} fhreagra as líne.",
+  "Sábháladh {n} fhreagra as líne.",
+  "Sábháladh {n} fhreagra as líne."
  ],
  "{n} review": [
   "{n} athbhreithniú",

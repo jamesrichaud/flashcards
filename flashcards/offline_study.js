@@ -3,6 +3,8 @@
 // only from the device's offline copy (window.FCOffline, flashcards/offline_client.js): a deck list
 // with today's counts and the study screen. Answers go into the device's queue (sent to the server
 // by part 3's sync); cards answered Again or still learning come back after their step, like Anki.
+// Part 3: an Add screen (text only, queued like the answers), and when the connection comes back the
+// queue is sent to the server (FCOffline.syncBack) and the copy refreshed.
 (function () {
 'use strict';
 const C = window.FCO || {}, M = C.msgs || {}, P = C.prefs || {}, F = window.FCOffline;
@@ -19,7 +21,7 @@ function toast(m) {
 }
 function flash(m) { const f = $('fco-flash'); f.textContent = m || ''; f.hidden = !m; }
 function view(name) {
-  for (const v of ['list', 'wait', 'study']) $('fco-' + v).hidden = v !== name;
+  for (const v of ['list', 'wait', 'study', 'add']) $('fco-' + v).hidden = v !== name;
   clearTimeout(waitTimer);
   if (name !== 'study') stopAudio();
 }
@@ -28,15 +30,31 @@ function fmtWait(ms) {
   return mins < 60 ? plural(M.minutes, mins) : plural(M.hours, Math.round(mins / 60));
 }
 async function banner() {
-  const b = $('fco-banner'); let n = 0;
-  try { n = (await F.answers()).filter(a => !a.sent).length; } catch (e) { /* no copy yet */ }
+  const b = $('fco-banner'); let w = {answers: 0, adds: 0}, undoable = 0;
+  try { w = await F.waiting(); undoable = (await F.answers()).filter(a => !a.sent && !a.syncedAt).length; }
+  catch (e) { /* no copy yet */ }
   const parts = [];
   if (navigator.onLine === false) parts.push(M.offline);
-  if (n) parts.push(plural(M.waiting, n));
+  if (w.answers) parts.push(plural(M.waiting, w.answers));
+  if (w.adds) parts.push(plural(M.addsWaiting, w.adds));
   b.textContent = parts.join(' · '); b.hidden = !parts.length;
-  for (const u of document.querySelectorAll('.fco-undo')) u.hidden = !n;
+  for (const u of document.querySelectorAll('.fco-undo')) u.hidden = !undoable;
 }
-window.addEventListener('online', banner);
+// Back online: send the queue, refresh the copy, then show the screen again from the new copy.
+let syncBusy = false;
+async function backOnline() {
+  banner();
+  if (syncBusy || navigator.onLine === false) return;
+  syncBusy = true;
+  try {
+    const res = await F.syncBack();
+    if (res) { flash(res.message || M.synced); banner(); await F.refresh(true); }
+  } catch (e) { /* tried again at the next 'online' or page load */ }
+  syncBusy = false;
+  banner();
+  if (!$('fco-list').hidden) showList($('fco-flash').textContent);
+}
+window.addEventListener('online', backOnline);
 window.addEventListener('offline', banner);
 
 // ---------- the deck list ----------
@@ -74,12 +92,13 @@ function go(path) { history.pushState(null, '', path); route(); }
 function route() {
   const m = /^\/(?:study|deck)\/(\d+)/.exec(location.pathname);
   if (m && /^\/study\//.test(location.pathname)) openDeck(+m[1]);
+  else if (/^\/add\b/.test(location.pathname)) showAdd();
   else showList();
 }
 window.addEventListener('popstate', route);
 document.addEventListener('click', e => {
   const a = e.target.closest && e.target.closest('a[data-nav]');
-  if (a) { e.preventDefault(); go('/offline/study'); }
+  if (a) { e.preventDefault(); go(a.dataset.nav || '/offline/study'); }
 });
 
 async function openDeck(did) {
@@ -173,7 +192,8 @@ function show() {
 async function answer(r) {
   if (!shown || sent || !CARD) return;
   sent = true; stopAudio();
-  try { await F.queueAnswer({cid: CARD.id, did: DECK.did, rating: r, ms: Date.now() - t0}); }
+  try { await F.queueAnswer({cid: CARD.id, did: DECK.did, rating: r, ms: Date.now() - t0, mod: CARD.mod,
+    reps: CARD.reps}); }
   catch (e) { sent = false; toast(M.error); return; }
   next();
 }
@@ -268,6 +288,64 @@ function key(e) {
 document.addEventListener('keydown', key);
 document.addEventListener('visibilitychange', () => { if (!document.hidden && DECK && !$('fco-wait').hidden) next(); });
 
+// ---------- adding notes offline (text only; saved on the server when the connection is back) ----------
+const TYPES = C.addTypes || [];
+let addDecks = [];
+function store(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { /* private mode */ } return null; }
+function fillFields() {
+  const nt = TYPES.find(x => String(x.id) === $('fco-nt').value) || TYPES[0], box = $('fco-fields');
+  box.textContent = '';
+  if (!nt) return;
+  nt.fields.forEach((name, i) => {
+    const l = document.createElement('label'), ta = document.createElement('textarea');
+    l.textContent = name; l.htmlFor = 'fco-f' + i; l.className = 'fco-flabel';
+    ta.id = 'fco-f' + i; ta.rows = i === 0 ? 3 : 2; ta.dataset.i = i;
+    box.appendChild(l); box.appendChild(ta);
+  });
+  $('fco-cloze-hint').hidden = !nt.cloze;
+}
+async function showAdd() {
+  view('add'); flash('');
+  try { addDecks = (await F.decks()).sort((a, b) => a.name.localeCompare(b.name)); } catch (e) { addDecks = []; }
+  const ds = $('fco-deck'); ds.textContent = '';
+  const list = addDecks.filter(d => !d.filtered).map(d => [d.did, d.name]);
+  if (!list.length) list.push([1, M.defaultDeck]);
+  const lastDeck = store('fc-offline-add-deck');
+  for (const [did, name] of list) {
+    const o = document.createElement('option'); o.value = did; o.textContent = name.split('::').join(' › ');
+    if (String(did) === lastDeck) o.selected = true; ds.appendChild(o);
+  }
+  const ns = $('fco-nt');
+  if (!ns.options.length) {
+    for (const nt of TYPES) { const o = document.createElement('option'); o.value = nt.id; o.textContent = nt.name; ns.appendChild(o); }
+    const last = store('fc-offline-add-nt');
+    if (last && TYPES.some(x => String(x.id) === last)) ns.value = last;
+    fillFields();
+  }
+  $('fco-add-none').hidden = TYPES.length > 0; $('fco-add-form').hidden = !TYPES.length;
+  banner();
+  const f = $('fco-f0'); if (f) f.focus();
+}
+$('fco-nt').addEventListener('change', () => { store('fc-offline-add-nt', $('fco-nt').value); fillFields(); });
+$('fco-deck').addEventListener('change', () => store('fc-offline-add-deck', $('fco-deck').value));
+async function addNote() {
+  const nt = TYPES.find(x => String(x.id) === $('fco-nt').value);
+  if (!nt) return;
+  const fields = Array.from(document.querySelectorAll('#fco-fields textarea')).map(t => t.value);
+  if (!fields[0] || !fields[0].trim()) { flash(M.firstEmpty); $('fco-f0').focus(); return; }
+  if (nt.cloze && !fields.some(v => /\{\{c\d+::/.test(v))) { flash(M.noCloze); $('fco-f0').focus(); return; }
+  try {
+    await F.queueAdd({ntid: nt.id, did: +$('fco-deck').value, fields: fields, tags: $('fco-tags').value.trim()});
+  } catch (e) { flash(M.error); return; }
+  for (const t of document.querySelectorAll('#fco-fields textarea')) t.value = '';   // tags stay, like Anki
+  flash(M.added); banner();
+  $('fco-f0').focus();
+}
+$('fco-add-btn').addEventListener('click', addNote);
+$('fco-add').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); addNote(); }
+});
+
 // ---------- start ----------
 async function start() {
   if (!F || !F.supported()) { view('list'); $('fco-empty').textContent = M.unsupported; $('fco-empty').hidden = false; return; }
@@ -279,14 +357,16 @@ async function start() {
     try {
       const a = JSON.parse(q), m = /^\/study\/(\d+)/.exec(location.pathname);
       const decks = await F.decks(), answers = await F.answers();
-      const known = decks.some(d => d.cardIds.includes(a.cid));
+      const known = decks.some(d => d.cardIds.includes(a.cid)), rec = (await F.getCards([a.cid])).get(a.cid);
       const dup = answers.some(x => x.cid === a.cid && Math.abs(x.ts - a.ts) < 2000);
       if (known && !dup && a.rating >= 1 && a.rating <= 4) {
-        await F.queueAnswer({cid: a.cid, did: m ? +m[1] : 0, rating: a.rating, ms: a.ms || 0, ts: a.ts || Date.now()});
+        await F.queueAnswer({cid: a.cid, did: m ? +m[1] : 0, rating: a.rating, ms: a.ms || 0, ts: a.ts || Date.now(),
+          mod: rec ? rec.mod : undefined, reps: rec ? rec.reps : undefined});
       }
     } catch (e) { /* a broken address: ignore it */ }
   }
   route();
+  if (navigator.onLine !== false) backOnline();   // shown while the server was down but the device is online
 }
 start();
 })();

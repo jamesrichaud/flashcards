@@ -32,6 +32,7 @@
  "Action": "Action",
  "Action…": "Action…",
  "Add": "Add",
+ "Add a cloze like {{c1::this}} to one of the fields.": "Add a cloze like {{c1::this}} to one of the fields.",
  "Add another person": "Add another person",
  "Add anyway": "Add anyway",
  "Add card": "Add card",
@@ -60,6 +61,7 @@
   "Added {n} card.",
   "Added {n} cards."
  ],
+ "Added. It will be saved on the server when the connection is back.": "Added. It will be saved on the server when the connection is back.",
  "Advanced (SM-2)": "Advanced (SM-2)",
  "Advanced Copy Fields": "Advanced Copy Fields",
  "After this, reviews and new cards from every device are merged again as usual.": "After this, reviews and new cards from every device are merged again as usual.",
@@ -103,6 +105,7 @@
  "Average time": "Average time",
  "Average time per day": "Average time per day",
  "Back": "Back",
+ "Back online: everything studied offline was saved.": "Back online: everything studied offline was saved.",
  "Back preview": "Back preview",
  "Back template": "Back template",
  "Back to add-ons": "Back to add-ons",
@@ -210,6 +213,7 @@
  "Cloze note types have one card type; each cloze number makes a card.": "Cloze note types have one card type; each cloze number makes a card.",
  "Cloze {n}": "Cloze {n}",
  "Cloze: select text and press {new} (Ctrl+Shift+C) for a new card, {same} (Ctrl+Shift+Alt+C) to add to the same card. Or type {example}.": "Cloze: select text and press {new} (Ctrl+Shift+C) for a new card, {same} (Ctrl+Shift+Alt+C) to add to the same card. Or type {example}.",
+ "Cloze: type {{c1::the hidden text}}; use c2, c3 … for more cards.": "Cloze: type {{c1::the hidden text}}; use c2, c3 … for more cards.",
  "Collapse by default": "Collapse by default",
  "Collapse {name}": "Collapse {name}",
  "Collection replaced with {name}: {n} note.": [
@@ -286,6 +290,7 @@
  "Deck: {name}": "Deck: {name}",
  "Decks": "Decks",
  "Default columns": "Default columns",
+ "Default deck": "Default deck",
  "Delete": "Delete",
  "Delete card type": "Delete card type",
  "Delete deck": "Delete deck",
@@ -697,11 +702,11 @@
  "Only new cards can be repositioned.": "Only new cards can be repositioned.",
  "Only pictures, audio and video can be added.": "Only pictures, audio and video can be added.",
  "Only sent when cards are due, at most once a day\n(“{example}”). Time zone: {tz} (set from this device when you save).": "Only sent when cards are due, at most once a day\n(“{example}”). Time zone: {tz} (set from this device when you save).",
- "Only studying works without a connection. Browse, Add and the other pages need the server.": "Only studying works without a connection. Browse, Add and the other pages need the server.",
  "Only the first {n} cards are kept offline.": "Only the first {n} cards are kept offline.",
  "Only the first {n} tags are shown.": "Only the first {n} tags are shown.",
  "Open AnkiWeb shared decks": "Open AnkiWeb shared decks",
  "Open in Wiktionary ↗": "Open in Wiktionary ↗",
+ "Open the app once with a connection to add notes offline.": "Open the app once with a connection to add notes offline.",
  "Open the sidebar": "Open the sidebar",
  "Optimize": "Optimize",
  "Optimize failed: {error}": "Optimize failed: {error}",
@@ -964,6 +969,7 @@
  "Study now": "Study now",
  "Study offline": "Study offline",
  "Study reminders": "Study reminders",
+ "Studying and adding notes (text only) work without a connection. Browse and the other pages need the server.": "Studying and adding notes (text only) work without a connection. Browse and the other pages need the server.",
  "Styling (shared by all card types)": "Styling (shared by all card types)",
  "Sun": "Sun",
  "Suspend": "Suspend",
@@ -1013,6 +1019,7 @@
  "Test notification sent. It can take a few seconds to arrive.": "Test notification sent. It can take a few seconds to arrive.",
  "Test the voice": "Test the voice",
  "Test: {title}": "Test: {title}",
+ "Text only. Notes added here are saved on the server when the connection is back.": "Text only. Notes added here are saved on the server when the connection is back.",
  "That Image Occlusion note no longer exists.": "That Image Occlusion note no longer exists.",
  "That backup was not found.": "That backup was not found.",
  "That card was not found.": "That card was not found.",
@@ -1041,6 +1048,7 @@
  "The file is bigger than {mb} MB.": "The file is bigger than {mb} MB.",
  "The file is empty.": "The file is empty.",
  "The file is larger than 100 MB.": "The file is larger than 100 MB.",
+ "The first field is empty.": "The first field is empty.",
  "The image could not be shown.": "The image could not be shown.",
  "The image file is empty.": "The image file is empty.",
  "The image is larger than 100 MB.": "The image is larger than 100 MB.",
@@ -1282,6 +1290,10 @@
   "{n} answer waiting to sync",
   "{n} answers waiting to sync"
  ],
+ "{n} answer was skipped because the card changed on another device.": [
+  "{n} answer was skipped because the card changed on another device.",
+  "{n} answers were skipped because the cards changed on another device."
+ ],
  "{n} bytes": [
   "{n} bytes",
   "{n} bytes"
@@ -1342,6 +1354,14 @@
   "{n} note",
   "{n} notes"
  ],
+ "{n} note added offline couldn't be saved (its note type was deleted, or it had no cards).": [
+  "{n} note added offline couldn't be saved (its note type was deleted, or it had no cards).",
+  "{n} notes added offline couldn't be saved (their note type was deleted, or they had no cards)."
+ ],
+ "{n} note added offline was saved.": [
+  "{n} note added offline was saved.",
+  "{n} notes added offline were saved."
+ ],
  "{n} note deleted.": [
   "{n} note deleted.",
   "{n} notes deleted."
@@ -1354,6 +1374,10 @@
   "{n} note updated.",
   "{n} notes updated."
  ],
+ "{n} note waiting to sync": [
+  "{n} note waiting to sync",
+  "{n} notes waiting to sync"
+ ],
  "{n} notes": [
   "{n} notes",
   "{n} notes"
@@ -1362,6 +1386,10 @@
  "{n} notes in Browse": [
   "{n} notes in Browse",
   "{n} notes in Browse"
+ ],
+ "{n} offline answer was saved.": [
+  "{n} offline answer was saved.",
+  "{n} offline answers were saved."
  ],
  "{n} review": [
   "{n} review",

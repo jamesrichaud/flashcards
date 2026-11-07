@@ -32,6 +32,7 @@
  "Action": "Ação",
  "Action…": "Ação…",
  "Add": "Adicionar",
+ "Add a cloze like {{c1::this}} to one of the fields.": "Adicione uma omissão como {{c1::isto}} num dos campos.",
  "Add another person": "Adicionar outra pessoa",
  "Add anyway": "Adicionar mesmo assim",
  "Add card": "Adicionar ficha",
@@ -60,6 +61,7 @@
   "Adicionada {n} ficha.",
   "Adicionadas {n} fichas."
  ],
+ "Added. It will be saved on the server when the connection is back.": "Adicionada. Será guardada no servidor quando a ligação voltar.",
  "Advanced (SM-2)": "Avançado (SM-2)",
  "Advanced Copy Fields": "Cópia avançada de campos",
  "After this, reviews and new cards from every device are merged again as usual.": "Depois disto, as revisões e fichas novas de todos os dispositivos voltam a ser combinadas como habitualmente.",
@@ -103,6 +105,7 @@
  "Average time": "Tempo médio",
  "Average time per day": "Tempo médio por dia",
  "Back": "Verso",
+ "Back online: everything studied offline was saved.": "De volta online: tudo o que foi estudado offline foi guardado.",
  "Back preview": "Pré-visualização do verso",
  "Back template": "Modelo do verso",
  "Back to add-ons": "Voltar aos extras",
@@ -210,6 +213,7 @@
  "Cloze note types have one card type; each cloze number makes a card.": "Os tipos de nota de omissão têm um tipo de ficha; cada número de omissão cria uma ficha.",
  "Cloze {n}": "Omissão {n}",
  "Cloze: select text and press {new} (Ctrl+Shift+C) for a new card, {same} (Ctrl+Shift+Alt+C) to add to the same card. Or type {example}.": "Omissão: selecione texto e prima {new} (Ctrl+Shift+C) para uma nova ficha, {same} (Ctrl+Shift+Alt+C) para adicionar à mesma ficha. Ou escreva {example}.",
+ "Cloze: type {{c1::the hidden text}}; use c2, c3 … for more cards.": "Omissão: escreva {{c1::o texto escondido}}; use c2, c3 … para mais cartões.",
  "Collapse by default": "Recolher por omissão",
  "Collapse {name}": "Recolher {name}",
  "Collection replaced with {name}: {n} note.": [
@@ -286,6 +290,7 @@
  "Deck: {name}": "Baralho: {name}",
  "Decks": "Baralhos",
  "Default columns": "Colunas predefinidas",
+ "Default deck": "Baralho predefinido",
  "Delete": "Eliminar",
  "Delete card type": "Eliminar tipo de ficha",
  "Delete deck": "Eliminar baralho",
@@ -697,11 +702,11 @@
  "Only new cards can be repositioned.": "Só as fichas novas podem ser reposicionadas.",
  "Only pictures, audio and video can be added.": "Só é possível adicionar imagens, áudio e vídeo.",
  "Only sent when cards are due, at most once a day\n(“{example}”). Time zone: {tz} (set from this device when you save).": "Só é enviado quando há fichas para rever, no máximo uma vez por dia\n(“{example}”). Fuso horário: {tz} (definido a partir deste dispositivo ao guardar).",
- "Only studying works without a connection. Browse, Add and the other pages need the server.": "Sem conexão só é possível estudar. Navegar, Adicionar e as outras páginas precisam do servidor.",
  "Only the first {n} cards are kept offline.": "Só as primeiras {n} fichas são guardadas offline.",
  "Only the first {n} tags are shown.": "Só são mostradas as primeiras {n} etiquetas.",
  "Open AnkiWeb shared decks": "Abrir baralhos partilhados do AnkiWeb",
  "Open in Wiktionary ↗": "Abrir no Wiktionary ↗",
+ "Open the app once with a connection to add notes offline.": "Abra a aplicação uma vez com ligação para adicionar notas offline.",
  "Open the sidebar": "Abrir a barra lateral",
  "Optimize": "Otimizar",
  "Optimize failed: {error}": "A otimização falhou: {error}",
@@ -964,6 +969,7 @@
  "Study now": "Estudar agora",
  "Study offline": "Estudar offline",
  "Study reminders": "Lembretes de estudo",
+ "Studying and adding notes (text only) work without a connection. Browse and the other pages need the server.": "Estudar e adicionar notas (só texto) funcionam sem ligação. Explorar e as outras páginas precisam do servidor.",
  "Styling (shared by all card types)": "Estilo (partilhado por todos os tipos de ficha)",
  "Sun": "dom",
  "Suspend": "Suspender",
@@ -1013,6 +1019,7 @@
  "Test notification sent. It can take a few seconds to arrive.": "Notificação de teste enviada. Pode demorar alguns segundos a chegar.",
  "Test the voice": "Testar a voz",
  "Test: {title}": "Teste: {title}",
+ "Text only. Notes added here are saved on the server when the connection is back.": "Só texto. As notas adicionadas aqui são guardadas no servidor quando a ligação voltar.",
  "That Image Occlusion note no longer exists.": "Essa nota de Oclusão de imagem já não existe.",
  "That backup was not found.": "Essa cópia de segurança não foi encontrada.",
  "That card was not found.": "Essa ficha não foi encontrada.",
@@ -1041,6 +1048,7 @@
  "The file is bigger than {mb} MB.": "O ficheiro tem mais de {mb} MB.",
  "The file is empty.": "O ficheiro está vazio.",
  "The file is larger than 100 MB.": "O ficheiro tem mais de 100 MB.",
+ "The first field is empty.": "O primeiro campo está vazio.",
  "The image could not be shown.": "Não foi possível mostrar a imagem.",
  "The image file is empty.": "O ficheiro de imagem está vazio.",
  "The image is larger than 100 MB.": "A imagem tem mais de 100 MB.",
@@ -1282,6 +1290,10 @@
   "{n} resposta a aguardar sincronização",
   "{n} respostas a aguardar sincronização"
  ],
+ "{n} answer was skipped because the card changed on another device.": [
+  "{n} resposta foi ignorada porque o cartão mudou noutro dispositivo.",
+  "{n} respostas foram ignoradas porque os cartões mudaram noutro dispositivo."
+ ],
  "{n} bytes": [
   "{n} byte",
   "{n} bytes"
@@ -1342,6 +1354,14 @@
   "{n} nota",
   "{n} notas"
  ],
+ "{n} note added offline couldn't be saved (its note type was deleted, or it had no cards).": [
+  "{n} nota adicionada offline não pôde ser guardada (o tipo de nota foi apagado ou não tinha cartões).",
+  "{n} notas adicionadas offline não puderam ser guardadas (o tipo de nota foi apagado ou não tinham cartões)."
+ ],
+ "{n} note added offline was saved.": [
+  "{n} nota adicionada offline foi guardada.",
+  "{n} notas adicionadas offline foram guardadas."
+ ],
  "{n} note deleted.": [
   "{n} nota eliminada.",
   "{n} notas eliminadas."
@@ -1354,6 +1374,10 @@
   "{n} nota atualizada.",
   "{n} notas atualizadas."
  ],
+ "{n} note waiting to sync": [
+  "{n} nota à espera de sincronização",
+  "{n} notas à espera de sincronização"
+ ],
  "{n} notes": [
   "{n} nota",
   "{n} notas"
@@ -1362,6 +1386,10 @@
  "{n} notes in Browse": [
   "{n} nota em Navegar",
   "{n} notas em Navegar"
+ ],
+ "{n} offline answer was saved.": [
+  "{n} resposta offline foi guardada.",
+  "{n} respostas offline foram guardadas."
  ],
  "{n} review": [
   "{n} revisão",

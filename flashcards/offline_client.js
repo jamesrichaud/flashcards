@@ -6,6 +6,10 @@
 // Preferences show its state. Nothing here changes the collection.
 // Part 2 (studying offline): the answer queue ("answers" store) and the offline session: which card
 // comes next, learning cards coming back after their step, button labels, typed-answer comparison.
+// Part 3 (sync back): when the server can be reached again, the queued answers and added notes are
+// sent to /offline/sync (flashcards/offline_sync.py), which replays them exactly once through the
+// scheduler; then the copy is refreshed. Sent answers stay (marked syncedAt) until a copy made after
+// the sync replaces them, so a card answered offline never comes back in between.
 (function () {
 'use strict';
 const F = {};
@@ -77,13 +81,14 @@ F.supported = function () {
 function openDB() {
   if (db) return Promise.resolve(db);
   return new Promise((ok, bad) => {
-    const r = indexedDB.open('fc-offline:' + USER, 2);
+    const r = indexedDB.open('fc-offline:' + USER, 3);
     r.onupgradeneeded = () => {
       const d = r.result;
       if (!d.objectStoreNames.contains('decks')) d.createObjectStore('decks', {keyPath: 'did'});
       if (!d.objectStoreNames.contains('cards')) d.createObjectStore('cards', {keyPath: 'id'});
       if (!d.objectStoreNames.contains('meta')) d.createObjectStore('meta');
       if (!d.objectStoreNames.contains('answers')) d.createObjectStore('answers', {keyPath: 'uid'});   // part 2
+      if (!d.objectStoreNames.contains('adds')) d.createObjectStore('adds', {keyPath: 'uid'});         // part 3
     };
     r.onsuccess = () => { db = r.result; db.onversionchange = () => { db.close(); db = null; }; ok(db); };
     r.onerror = () => bad(r.error);
@@ -152,9 +157,10 @@ async function update(force) {
       try { if (!(await navigator.storage.persisted())) await navigator.storage.persist(); } catch (e) { /* ignore */ }
     }
     const stored = new Map((await getAll('cards')).map(c => [c.id, c]));
+    const started = Date.now();
     for (const dk of st.decks) {
       running = 'deck:' + dk.did; render();
-      const prev = local.find(k => k.did === dk.did), known = {};
+      const prev = local.find(k => k.did === dk.did), known = {}, asOf = Date.now();
       for (const [id, c] of stored) if (c.q) known[id] = c.rkey;   // also cards kept for another deck
       const res = await fetch('/offline/deck/' + dk.did + '/snapshot', {method: 'POST', credentials: 'same-origin',
         headers: {'Content-Type': 'application/json'}, body: JSON.stringify({known: known})});
@@ -174,10 +180,12 @@ async function update(force) {
       tx.objectStore('decks').put({did: snap.did, name: snap.name, updated: Date.now(), today: snap.today,
         cutoff: snap.cutoff, days: snap.days, counts: snap.counts, queue: snap.queue, filtered: snap.filtered,
         cardIds: snap.cards.map(c => c.id), media: snap.media, confs: snap.confs, truncated: snap.truncated,
-        generated: snap.generated, bytes: bytes, mediaBytes: prev ? prev.mediaBytes || 0 : 0});
+        generated: snap.generated, bytes: bytes, mediaBytes: prev ? prev.mediaBytes || 0 : 0, asOf: asOf,
+        learnAhead: snap.learnAhead});
       await done(tx);
     }
     await gcCards();
+    await gcSynced(started);
     await cacheShell(st);
     const m = await syncMedia(await getAll('decks'), st);
     await putMeta(Object.assign(meta, {version: st.version, updated: Date.now(), error: ''}, m));
@@ -352,6 +360,7 @@ F.session = function (deck, cards, answers, now, prefer) {
   const inDeck = new Set(deck.cardIds), st = new Map();
   for (const a of answers.slice().sort((x, y) => x.ts - y.ts)) {
     if (!inDeck.has(a.cid)) continue;
+    if (a.syncedAt && deck.asOf && a.syncedAt <= deck.asOf) continue;   // the copy already has it (part 3)
     const c = cards.get(a.cid); if (!c) continue;
     const prev = st.get(a.cid), conf = (deck.confs || {})[c.conf] || {};
     if (prev && prev.done) continue;
@@ -477,7 +486,9 @@ F.uid = function () {
   return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
 };
 F.answers = async function () { return (await getAll('answers')).sort((a, b) => a.ts - b.ts); };
-// a: {cid, did, rating, ms, ts}. Each answer gets a unique id so the server can apply it exactly once.
+// a: {cid, did, rating, ms, ts, mod, reps}. Each answer gets a unique id so the server can apply it
+// exactly once; mod and reps are the card's modification time and review count in the copy, so the
+// server can tell if it was changed or answered elsewhere.
 F.queueAnswer = async function (a) {
   const rec = Object.assign({uid: F.uid(), ts: Date.now()}, a);
   rec.ms = Math.max(0, Math.min(3600000, Math.round(rec.ms || 0)));
@@ -488,7 +499,7 @@ F.queueAnswer = async function (a) {
 };
 // Undo: forget the last offline answer that hasn't been sent yet.
 F.undoLast = async function () {
-  const all = (await F.answers()).filter(a => !a.sent);
+  const all = (await F.answers()).filter(a => !a.sent && !a.syncedAt);
   const last = all[all.length - 1];
   if (!last) return null;
   const d = await openDB(), tx = d.transaction('answers', 'readwrite');
@@ -503,6 +514,86 @@ F.getCards = async function (ids) {
   return out;
 };
 F.decks = () => getAll('decks');
+// Answers and added notes not yet saved on the server.
+F.waiting = async function () {
+  const a = (await getAll('answers')).filter(x => !x.syncedAt), n = (await getAll('adds')).filter(x => !x.syncedAt);
+  return {answers: a.length, adds: n.length};
+};
+
+// ---------- part 3: notes added offline, and sending everything back ----------
+// n: {ntid, did, fields: [text, ...], tags}. Text only; the server escapes it.
+F.queueAdd = async function (n) {
+  const rec = Object.assign({uid: F.uid(), ts: Date.now()}, n);
+  const d = await openDB(), tx = d.transaction('adds', 'readwrite');
+  tx.objectStore('adds').put(rec);
+  await done(tx);
+  return rec;
+};
+F.adds = async function () { return (await getAll('adds')).sort((a, b) => a.ts - b.ts); };
+// What to send: answers in the order given, each with the card's modification time as the copy had it
+// when it was answered (answers queued before part 3 didn't record it: the copy's is used).
+F.syncPayload = function (answers, adds, cards) {
+  return {
+    answers: answers.filter(a => !a.syncedAt).sort((x, y) => x.ts - y.ts).map(a => ({uid: a.uid, cid: a.cid, did: a.did,
+      rating: a.rating, ms: a.ms, ts: a.ts, mod: a.mod != null ? a.mod : ((cards.get(a.cid) || {}).mod),
+      reps: a.mod != null ? a.reps : ((cards.get(a.cid) || {}).reps)})),
+    adds: adds.filter(a => !a.syncedAt).map(a => ({uid: a.uid, ntid: a.ntid, did: a.did, fields: a.fields,
+      tags: a.tags || '', ts: a.ts})),
+  };
+};
+// This device's id (sent with each sync; see flashcards/offline_sync.py).
+let DEVICE = '';
+F.device = function () {
+  if (DEVICE) return DEVICE;
+  try { DEVICE = localStorage.getItem('fc-offline-device') || ''; } catch (e) { /* private mode */ }
+  if (!DEVICE) { DEVICE = F.uid(); try { localStorage.setItem('fc-offline-device', DEVICE); } catch (e) { /* ignore */ } }
+  return DEVICE;
+};
+let syncing = null;
+// Send the queue. Returns null (nothing to send, or the server can't be reached / not logged in) or
+// the server's summary {answered, skipped, added, failed, message, ...}.
+F.syncBack = function () {
+  if (syncing) return syncing;
+  syncing = (async () => {
+    if (!F.supported() || !USER) return null;
+    const answers = await getAll('answers'), adds = await getAll('adds');
+    const ids = Array.from(new Set(answers.filter(a => !a.syncedAt).map(a => a.cid)));
+    const body = F.syncPayload(answers, adds, await F.getCards(ids));
+    body.device = F.device();
+    if (!body.answers.length && !body.adds.length) return null;
+    // Only once the server answers (and the person is logged in): from then on these can't be undone
+    // on the device, as the server may already have them.
+    try {
+      const p = await fetch('/offline/state', {cache: 'no-store', credentials: 'same-origin'});
+      if (!p.ok) return null;
+    } catch (e) { return null; }
+    let d = await openDB(), tx = d.transaction('answers', 'readwrite');
+    for (const a of answers) if (!a.syncedAt && !a.sent) { a.sent = true; tx.objectStore('answers').put(a); }
+    await done(tx);
+    let res;
+    try {
+      const r = await fetch('/offline/sync', {method: 'POST', credentials: 'same-origin', cache: 'no-store',
+        headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+      if (!r.ok) return null;
+      res = await r.json();
+    } catch (e) { return null; }
+    const got = res.results || {}, now = Date.now();
+    d = await openDB(); tx = d.transaction(['answers', 'adds'], 'readwrite');
+    for (const a of answers) if (!a.syncedAt && a.uid in got) { a.syncedAt = now; a.result = got[a.uid]; tx.objectStore('answers').put(a); }
+    for (const n of adds) if (n.uid in got) tx.objectStore('adds').delete(n.uid);
+    await done(tx);
+    if (typeof window !== 'undefined' && window.fcStampSeen && res.stamp) window.fcStampSeen(res.stamp);
+    return res;
+  })();
+  return syncing.finally(() => { syncing = null; });
+};
+// Sent answers are kept until a copy made after they were saved on the server has replaced them.
+async function gcSynced(before) {
+  const d = await openDB(), tx = d.transaction('answers', 'readwrite'), s = tx.objectStore('answers');
+  for (const a of await req(s.getAll())) if (a.syncedAt && a.syncedAt <= before) s.delete(a.uid);
+  return done(tx);
+}
+F._gcSynced = gcSynced;
 F.meta = () => getMeta();
 F.user = () => USER;
 
@@ -519,11 +610,48 @@ try {
   else USER = localStorage.getItem('fc-offline-user') || '';
 } catch (e) { /* private mode */ }
 if (document.currentScript.dataset.page === 'study') return;   // the offline study page drives itself
+// What the last sync back said, shown at the top of the page until closed (kept for a minute so a
+// page reload right after doesn't lose it).
+const NOTE_KEY = 'fc-offline-synced';
+function showNote() {
+  let n = null;
+  try { n = JSON.parse(sessionStorage.getItem(NOTE_KEY) || 'null'); } catch (e) { return; }
+  if (!n || !n.msg || Date.now() - n.at > 60000) return;
+  const main = document.querySelector('main'); if (!main || document.getElementById('fc-synced')) return;
+  const box = document.createElement('div');
+  box.id = 'fc-synced'; box.setAttribute('role', 'status');
+  box.className = 'flash' + (n.warn ? ' fc-off-warn' : '');
+  box.style.display = 'flex'; box.style.gap = '10px'; box.style.alignItems = 'center';
+  const tx = document.createElement('span'); tx.textContent = n.msg; tx.style.flex = '1';
+  const x = document.createElement('button'); x.type = 'button'; x.textContent = '×'; x.setAttribute('aria-label', 'OK');
+  x.addEventListener('click', () => { box.remove(); try { sessionStorage.removeItem(NOTE_KEY); } catch (e) { /* ignore */ } });
+  box.appendChild(tx); box.appendChild(x); main.insertBefore(box, main.firstChild);
+}
+async function syncThenRefresh() {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+  let res = null;
+  try { res = await F.syncBack(); } catch (e) { res = null; }
+  if (res && res.message) {
+    try { sessionStorage.setItem(NOTE_KEY, JSON.stringify({msg: res.message, at: Date.now(), warn: !!(res.skipped || res.failed)})); }
+    catch (e) { /* private mode */ }
+    // The page was made before these answers reached the server: show it again (unless something
+    // is being typed or edited on it).
+    const busy = document.querySelector('[data-noundokey]') || (document.activeElement &&
+      /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName)) || document.querySelector('[contenteditable=true]');
+    if (!busy && (res.answered || res.added)) { location.replace(location.pathname + location.search); return; }
+    showNote();
+  }
+  refresh(!!res);
+}
+F.syncThenRefresh = syncThenRefresh;
 function start() {
   render();
-  setTimeout(() => refresh(false), 1500);       // let the page's own requests go first
+  showNote();
+  // Anything studied offline goes to the server first, then the copy is refreshed.
+  F.waiting().then(w => { if (w.answers || w.adds) syncThenRefresh(); else setTimeout(() => refresh(false), 1500); },
+    () => setTimeout(() => refresh(false), 1500));   // let the page's own requests go first
   setInterval(render, 30000);                   // keeps "updated 2 min ago" current
-  window.addEventListener('online', () => refresh(false));
+  window.addEventListener('online', syncThenRefresh);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(false); });
 }
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();

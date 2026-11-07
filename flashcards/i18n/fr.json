@@ -32,6 +32,7 @@
  "Action": "Action",
  "Action…": "Action…",
  "Add": "Ajouter",
+ "Add a cloze like {{c1::this}} to one of the fields.": "Ajoutez un trou comme {{c1::ceci}} dans un des champs.",
  "Add another person": "Ajouter une autre personne",
  "Add anyway": "Ajouter quand même",
  "Add card": "Ajouter une carte",
@@ -60,6 +61,7 @@
   "{n} carte ajoutée.",
   "{n} cartes ajoutées."
  ],
+ "Added. It will be saved on the server when the connection is back.": "Ajoutée. Elle sera enregistrée sur le serveur au retour de la connexion.",
  "Advanced (SM-2)": "Avancé (SM-2)",
  "Advanced Copy Fields": "Copie avancée de champs",
  "After this, reviews and new cards from every device are merged again as usual.": "Ensuite, les révisions et nouvelles cartes de tous les appareils sont de nouveau fusionnées comme d'habitude.",
@@ -103,6 +105,7 @@
  "Average time": "Temps moyen",
  "Average time per day": "Temps moyen par jour",
  "Back": "Verso",
+ "Back online: everything studied offline was saved.": "De retour en ligne : tout ce qui a été étudié hors ligne a été enregistré.",
  "Back preview": "Aperçu du verso",
  "Back template": "Modèle du verso",
  "Back to add-ons": "Retour aux extensions",
@@ -210,6 +213,7 @@
  "Cloze note types have one card type; each cloze number makes a card.": "Les types de notes à trous ont un seul type de carte ; chaque numéro de trou crée une carte.",
  "Cloze {n}": "Trou {n}",
  "Cloze: select text and press {new} (Ctrl+Shift+C) for a new card, {same} (Ctrl+Shift+Alt+C) to add to the same card. Or type {example}.": "Texte à trous : sélectionnez du texte et appuyez sur {new} (Ctrl+Shift+C) pour une nouvelle carte, {same} (Ctrl+Shift+Alt+C) pour l'ajouter à la même carte. Ou tapez {example}.",
+ "Cloze: type {{c1::the hidden text}}; use c2, c3 … for more cards.": "Texte à trous : tapez {{c1::le texte caché}} ; utilisez c2, c3 … pour d'autres cartes.",
  "Collapse by default": "Replier par défaut",
  "Collapse {name}": "Replier {name}",
  "Collection replaced with {name}: {n} note.": [
@@ -286,6 +290,7 @@
  "Deck: {name}": "Paquet : {name}",
  "Decks": "Paquets",
  "Default columns": "Colonnes par défaut",
+ "Default deck": "Paquet par défaut",
  "Delete": "Supprimer",
  "Delete card type": "Supprimer le type de carte",
  "Delete deck": "Supprimer le paquet",
@@ -697,11 +702,11 @@
  "Only new cards can be repositioned.": "Seules les nouvelles cartes peuvent être repositionnées.",
  "Only pictures, audio and video can be added.": "Seuls les images, l'audio et la vidéo peuvent être ajoutés.",
  "Only sent when cards are due, at most once a day\n(“{example}”). Time zone: {tz} (set from this device when you save).": "Envoyé seulement quand des cartes sont à réviser, au plus une fois par jour\n(« {example} »). Fuseau horaire : {tz} (pris sur cet appareil à l'enregistrement).",
- "Only studying works without a connection. Browse, Add and the other pages need the server.": "Hors ligne, seule l'étude fonctionne. Parcourir, Ajouter et les autres pages ont besoin du serveur.",
  "Only the first {n} cards are kept offline.": "Seules les {n} premières cartes sont gardées hors ligne.",
  "Only the first {n} tags are shown.": "Seules les {n} premières étiquettes sont affichées.",
  "Open AnkiWeb shared decks": "Ouvrir les paquets partagés AnkiWeb",
  "Open in Wiktionary ↗": "Ouvrir dans le Wiktionnaire ↗",
+ "Open the app once with a connection to add notes offline.": "Ouvrez l'application une fois avec une connexion pour ajouter des notes hors ligne.",
  "Open the sidebar": "Ouvrir le panneau latéral",
  "Optimize": "Optimiser",
  "Optimize failed: {error}": "Échec de l'optimisation : {error}",
@@ -964,6 +969,7 @@
  "Study now": "Étudier maintenant",
  "Study offline": "Étudier hors ligne",
  "Study reminders": "Rappels d'étude",
+ "Studying and adding notes (text only) work without a connection. Browse and the other pages need the server.": "Étudier et ajouter des notes (texte seulement) fonctionnent sans connexion. Parcourir et les autres pages ont besoin du serveur.",
  "Styling (shared by all card types)": "Style (commun à tous les types de cartes)",
  "Sun": "dim.",
  "Suspend": "Suspendre",
@@ -1013,6 +1019,7 @@
  "Test notification sent. It can take a few seconds to arrive.": "Notification de test envoyée. Elle peut mettre quelques secondes à arriver.",
  "Test the voice": "Tester la voix",
  "Test: {title}": "Test : {title}",
+ "Text only. Notes added here are saved on the server when the connection is back.": "Texte seulement. Les notes ajoutées ici sont enregistrées sur le serveur au retour de la connexion.",
  "That Image Occlusion note no longer exists.": "Cette note Image Occlusion n'existe plus.",
  "That backup was not found.": "Cette sauvegarde est introuvable.",
  "That card was not found.": "Cette carte est introuvable.",
@@ -1041,6 +1048,7 @@
  "The file is bigger than {mb} MB.": "Le fichier dépasse {mb} Mo.",
  "The file is empty.": "Le fichier est vide.",
  "The file is larger than 100 MB.": "Le fichier dépasse 100 Mo.",
+ "The first field is empty.": "Le premier champ est vide.",
  "The image could not be shown.": "L'image n'a pas pu être affichée.",
  "The image file is empty.": "Le fichier image est vide.",
  "The image is larger than 100 MB.": "L'image dépasse 100 Mo.",
@@ -1282,6 +1290,10 @@
   "{n} réponse en attente de synchronisation",
   "{n} réponses en attente de synchronisation"
  ],
+ "{n} answer was skipped because the card changed on another device.": [
+  "{n} réponse a été ignorée car la carte a changé sur un autre appareil.",
+  "{n} réponses ont été ignorées car les cartes ont changé sur un autre appareil."
+ ],
  "{n} bytes": [
   "{n} octet",
   "{n} octets"
@@ -1342,6 +1354,14 @@
   "{n} note",
   "{n} notes"
  ],
+ "{n} note added offline couldn't be saved (its note type was deleted, or it had no cards).": [
+  "{n} note ajoutée hors ligne n'a pas pu être enregistrée (son type de note a été supprimé, ou elle n'avait pas de carte).",
+  "{n} notes ajoutées hors ligne n'ont pas pu être enregistrées (leur type de note a été supprimé, ou elles n'avaient pas de carte)."
+ ],
+ "{n} note added offline was saved.": [
+  "{n} note ajoutée hors ligne a été enregistrée.",
+  "{n} notes ajoutées hors ligne ont été enregistrées."
+ ],
  "{n} note deleted.": [
   "{n} note supprimée.",
   "{n} notes supprimées."
@@ -1354,6 +1374,10 @@
   "{n} note mise à jour.",
   "{n} notes mises à jour."
  ],
+ "{n} note waiting to sync": [
+  "{n} note en attente de synchronisation",
+  "{n} notes en attente de synchronisation"
+ ],
  "{n} notes": [
   "{n} note",
   "{n} notes"
@@ -1362,6 +1386,10 @@
  "{n} notes in Browse": [
   "{n} note dans Parcourir",
   "{n} notes dans Parcourir"
+ ],
+ "{n} offline answer was saved.": [
+  "{n} réponse hors ligne a été enregistrée.",
+  "{n} réponses hors ligne ont été enregistrées."
  ],
  "{n} review": [
   "{n} révision",

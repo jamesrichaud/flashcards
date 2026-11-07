@@ -298,7 +298,7 @@ def snapshot(col, did, known=None):
         if cid_conf not in confs:
             confs[cid_conf] = conf_info(col, conf)
         rec = {"id": cid, "nid": card.nid, "did": card.did, "odid": card.odid, "day": day, "group": group,
-               "queue": queue, "type": ctype, "due": due, "mod": cmod, "conf": cid_conf, "labels": labels,
+               "queue": queue, "type": ctype, "due": due, "mod": cmod, "reps": card.reps, "conf": cid_conf, "labels": labels,
                "next": nxt, "rl": rl, "approx": day > 0, "flag": card.user_flag(), "rkey": rkey}
         qtext, atext = card.question(), card.answer()
         names = _media_names(col, card, mid, qtext, atext)
@@ -575,6 +575,13 @@ def study_messages():
         "undone": t("The last offline answer was undone."),
         "error": t("Couldn't open the offline copy on this device."),
         "updated": t("Offline copy updated {ago}"),
+        # part 3: adding notes offline, sending everything back
+        "addsWaiting": plural_table("{n} note waiting to sync", "{n} notes waiting to sync"),
+        "synced": t("Back online: everything studied offline was saved."),
+        "defaultDeck": t("Default deck"),
+        "firstEmpty": t("The first field is empty."),
+        "noCloze": t("Add a cloze like {{c1::this}} to one of the fields."),
+        "added": t("Added. It will be saved on the server when the connection is back."),
     }
 
 
@@ -589,12 +596,15 @@ def study_page(request):
     user = core.current_user(request)
     prefs = {"times": True, "counts": True, "tap": False}
     wb, theme = dict(whiteboard.DEFAULT), "system"
+    types = []
     if user:
         with core.collection(user) as col:
             r = col.get_preferences().reviewing
             prefs = {"times": bool(r.show_intervals_on_buttons), "counts": bool(r.show_remaining_due_counts),
                      "tap": touch.tap_zones(col)}
             wb, theme = whiteboard.settings(col), core.theme_of(col)
+            from flashcards import offline_sync
+            types = offline_sync.add_types(col)
     e = core.h
     root = f' class="{theme}"' if theme in ("light", "dark") else ""
     lang = i18n.current()
@@ -603,7 +613,8 @@ def study_page(request):
     colors = ["again", "hard", "good", "easy"]
     btns = "".join(f'<button class="ans" style="border-color:var(--{c});color:var(--{c})" data-r="{i + 1}">'
                    f'<small></small><br>{e(n)}</button>' for i, (n, c) in enumerate(zip(names, colors)))
-    cfg = {"msgs": study_messages(), "prefs": prefs, "slot": core.TYPE_SLOT, "user": user or ""}
+    cfg = {"msgs": study_messages(), "prefs": prefs, "slot": core.TYPE_SLOT, "user": user or "",
+           "addTypes": types}
     with open(STUDY_JS_PATH, encoding="utf-8") as f:
         study_js = f.read()
     wb_wiring = (f"<script>{whiteboard.JS}\nwindow.WB=fcWhiteboard({{canvas:document.getElementById('wb'),"
@@ -612,16 +623,30 @@ def study_page(request):
                  "dark:()=>{const c=document.documentElement.classList;return c.contains('dark')||"
                  "(!c.contains('light')&&matchMedia('(prefers-color-scheme:dark)').matches);},"
                  "save:()=>{}});</script>")
-    body = f"""<header><b>Flashcards</b><a href="/" id="fco-home">{e(t("Decks"))}</a></header>
+    body = f"""<header><b>Flashcards</b><a href="/" id="fco-home">{e(t("Decks"))}</a><a href="/add" id="fco-add-link" data-nav="/add">{e(t("Add"))}</a></header>
 <div id="fco-banner" role="status" hidden></div>
 <main>
 <div id="fco-flash" class="flash" hidden></div>
 <section id="fco-list" hidden>
 <h2 style="margin-top:0">{e(t("Study offline"))}</h2>
-<p class="muted" style="font-size:15px">{e(t("Only studying works without a connection. Browse, Add and the other pages need the server."))}</p>
+<p class="muted" style="font-size:15px">{e(t("Studying and adding notes (text only) work without a connection. Browse and the other pages need the server."))}</p>
 <div class="box" style="padding:6px 18px"><table><thead><tr><th>{e(t("Deck"))}</th><th class="n">{e(t("New"))}</th>
 <th class="n">{e(t("Learn"))}</th><th class="n">{e(t("Due"))}</th></tr></thead><tbody id="fco-decks"></tbody></table>
 <p id="fco-empty" class="muted" hidden></p></div>
+</section>
+<section id="fco-add" hidden>
+<h2 style="margin-top:0">{e(t("Add"))}</h2>
+<p class="muted" style="font-size:15px">{e(t("Text only. Notes added here are saved on the server when the connection is back."))}</p>
+<p id="fco-add-none" class="muted" hidden>{e(t("Open the app once with a connection to add notes offline."))}</p>
+<div class="box" id="fco-add-form">
+<div class="row" style="flex-wrap:wrap"><label>{e(t("Note type"))} <select id="fco-nt"></select></label>
+<label>{e(t("Deck"))} <select id="fco-deck"></select></label></div>
+<div id="fco-fields"></div>
+<p id="fco-cloze-hint" class="muted" hidden>{e(t("Cloze: type {{c1::the hidden text}}; use c2, c3 … for more cards."))}</p>
+<label class="fco-flabel" for="fco-tags">{e(t("Tags"))}</label><input id="fco-tags" autocomplete="off" autocapitalize="off">
+<div class="row" style="margin-top:14px"><button type="button" class="primary" id="fco-add-btn">{e(t("Add"))}</button>
+<a href="/offline/study" class="btn" data-nav>{e(t("Study offline"))}</a></div>
+</div>
 </section>
 <section id="fco-wait" hidden><div class="row" style="margin-bottom:10px"><a href="/offline/study" class="btn" data-nav>{e(t("← Deck"))}</a>
 <button type="button" class="fco-undo" hidden>{e(t("Undo"))}</button></div>
@@ -657,7 +682,10 @@ def study_page(request):
 STUDY_PAGE_CSS = """#fco-banner{background:#8a5a00;color:#fff;text-align:center;padding:8px 16px;font-size:15px;
 position:sticky;top:0;z-index:6}#fco-decks a{min-height:44px;display:flex;align-items:center}
 #fco-decks td{padding:4px 8px}#fco-approx{font-size:13px;text-align:center;margin:6px 0 0}
-.counts span:empty{display:none}"""
+.counts span:empty{display:none}
+.fco-flabel{display:block;font-weight:600;margin:12px 0 4px}#fco-fields textarea,#fco-tags{width:100%;font:inherit;
+padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink);min-height:44px}
+#fco-add select{min-height:44px;font:inherit}"""
 
 
 @router.get("/offline/study")
