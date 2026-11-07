@@ -576,6 +576,7 @@ def study(request: Request, did: int, cid: int = 0, shown: int = 0, ms: int = 0,
         show_counts, show_times = rprefs.show_remaining_due_counts, rprefs.show_intervals_on_buttons
         theme = theme_of(col)
         tap = touch_mod.tap_zones(col)
+        wb = whiteboard.settings(col)
     timebox_start(request, did)
     # Coming back from Edit or Card info: same card, same side, timer carries on.
     resume = cid == card.id
@@ -623,7 +624,7 @@ background:var(--ink);color:var(--bg);
 padding:10px 18px;border-radius:10px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:20}}
 html,body{{overscroll-behavior:none}}.bar{{padding-bottom:max(12px,env(safe-area-inset-bottom))}}
 .ans,#show{{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}}
-#taphint{{font-size:13px;text-align:center;margin:0 0 6px}}</style>
+#taphint{{font-size:13px;text-align:center;margin:0 0 6px}}{whiteboard.CSS}</style>
 <div class="row" style="justify-content:space-between;margin-bottom:10px">
 <a href="/deck/{did}" class="btn">← Deck</a>
 <div class="counts"><span id="flag" class="dot" title="{FLAG_NAME[flag]} flag"
@@ -632,10 +633,10 @@ style="background:{FLAG_COLOR[flag]};{'' if flag else 'display:none'}"></span>
 {f'''<span class="new {'cur' if kind == 'new' else ''}">{counts[0]}</span>
 <span class="lrn {'cur' if kind == 'lrn' else ''}">{counts[1]}</span>
 <span class="rev {'cur' if kind == 'rev' else ''}">{counts[2]}</span>''' if show_counts else ''}</div>
-<div class="row">{undo}{replay_btn}<a class="btn" href="/edit/{card.nid}?back=/study/{did}"
+<div class="row">{undo}{replay_btn}{whiteboard.toggle_html(wb)}<a class="btn" href="/edit/{card.nid}?back=/study/{did}"
 onclick="edit();return false;">Edit</a>{menu}</div></div>
-<div id="toast"></div>
-<iframe id="frame" sandbox="allow-same-origin allow-scripts"></iframe>
+<div id="toast"></div>{whiteboard.bar_html(wb)}
+<div id="wbwrap"><iframe id="frame" sandbox="allow-same-origin allow-scripts"></iframe><canvas id="wb" style="display:none"></canvas></div>
 <form id="f" method="post" action="/study/{did}/answer"><input type="hidden" name="card_id" value="{card.id}">
 <input type="hidden" name="rating" id="rating"><input type="hidden" name="ms" id="ms"></form>
 <div class="bar">{'<p id="taphint" class="muted">Tap the card to show the answer</p>' if tap else ''}<button id="show" class="primary" style="width:100%;min-height:64px" onclick="show()">Show answer</button>
@@ -663,6 +664,13 @@ function tapZones(doc){{let sx=0,sy=0,st=0,on=false;
   if(!shown){{show();return;}}
   if(Date.now()-shownAt<400)return;  // a quick double tap must not show and answer at once
   answer(e.clientX<doc.documentElement.clientWidth/2?1:3);}},true);}}
+// ---- a tap on the whiteboard goes to the card: its links/buttons/inputs, else the tap zones
+function wbTap(x,y){{const d=fr.contentDocument;if(!d)return;x-=fr.clientLeft;y-=fr.clientTop;
+ const el=d.elementFromPoint(x,y),c=el&&el.closest&&el.closest('a,button,input,textarea,select,label,audio,video,summary,[contenteditable],[onclick]');
+ if(c){{if(c.matches('input,textarea,select,[contenteditable]'))c.focus();
+  else if(c.matches('audio,video'))c.paused?c.play().catch(()=>{{}}):c.pause();else c.click();return;}}
+ if(!TAP)return;if(!shown){{show();return;}}
+ if(Date.now()-shownAt<400)return;answer(x<d.documentElement.clientWidth/2?1:3);}}
 // ---- audio: a small queue player, like Anki's (sound files and TTS) ----
 let playing=[],cur=null;
 function stopAudio(){{playing=[];if(cur&&cur.pause)cur.pause();cur=null;
@@ -724,7 +732,7 @@ if({js(start_shown)})show();else{{load(Q);if(AV.autoplay&&!quiet)playList(AV.q);
 const FL={js(flash.lstrip('!'))};if(FL)toast(FL);
 window.FC_AFTER_UNDO='/study/{did}';
 window.addEventListener('pageshow',e=>{{if(e.persisted)sent=false;}});
-</script>"""
+</script>{whiteboard.study_script(wb)}"""
     return page("Study", body, user, "decks")
 
 @app.post("/study/{did}/typeans")
@@ -1314,3 +1322,5 @@ app.include_router(touch_mod.router)
 from flashcards import addons  # noqa: E402  (study screen calls its card_render/after_answer hooks)
 app.include_router(addons.router)
 app.mount("/addon", addons.Dispatcher())
+from flashcards import whiteboard  # noqa: E402  (study screen's drawing layer)
+app.include_router(whiteboard.router)
