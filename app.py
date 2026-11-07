@@ -216,14 +216,22 @@ def deck_overview(request: Request, did: int):
     if conf:
         opts = f"""<div class="box row"><div style="flex:1;min-width:200px"><h3 style="margin:0">Deck options</h3>
 <span class="muted" style="font-size:14px">Preset “{html.escape(conf['name'])}”: {conf['new']['perDay']} new/day,
-{conf['rev']['perDay']} reviews/day</span></div><a class="btn" href="/deck/{did}/options">Options</a></div>"""
+{conf['rev']['perDay']} reviews/day</span></div><a class="btn" href="/deck/{did}/custom">Custom study</a>
+<a class="btn" href="/deck/{did}/options">Options</a></div>"""
+    else:
+        opts = f"""<div class="box row"><div style="flex:1;min-width:200px"><h3 style="margin:0">Filtered deck</h3>
+<span class="muted" style="font-size:14px">Cards are borrowed from their home decks until the deck is emptied.</span></div>
+<form method="post" action="/deck/{did}/rebuild"><button>Rebuild</button></form>
+<form method="post" action="/deck/{did}/empty"><button>Empty</button></form></div>"""
     body = f"""<div class="box" style="text-align:center"><h2 style="margin-top:0">{html.escape(deck['name'])}</h2>
 <div class="row" style="justify-content:center;gap:28px;font-size:20px">
 <span class="new">New <b>{new}</b></span><span class="lrn">Learning <b>{lrn}</b></span>
 <span class="rev">To review <b>{rev}</b></span></div>
 <p class="muted">{total} cards in deck</p>
 {'<a class="btn primary" style="min-width:200px" href="/study/%d">Study now</a>' % did if new + lrn + rev
- else '<p>Congratulations! You have finished this deck for now.</p>'}
+ else '<p>Congratulations! You have finished this deck for now.</p>' + (
+ f'<p class="muted">To study outside the regular schedule, use <a href="/deck/{did}/custom">Custom study</a>.</p>'
+ if conf else '')}
 </div>{opts}
 <div class="box row"><a class="btn" href="/browse?q=%22deck:{html.escape(deck['name'])}%22">Browse cards</a>
 <a class="btn" href="/deck/{did}/export">Export .apkg</a>
@@ -1392,3 +1400,5 @@ def healthz():
 # ---------- route modules ----------
 from flashcards import deck_options  # noqa: E402  (imports helpers from this module)
 app.include_router(deck_options.router)
+from flashcards import custom_study  # noqa: E402
+app.include_router(custom_study.router)
