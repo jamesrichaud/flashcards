@@ -381,6 +381,101 @@ def flag_dot(flag, size=12):
     return (f'<span title="{FLAG_NAME[flag]} flag" style="display:inline-block;width:{size}px;height:{size}px;'
             f'border-radius:50%;background:{FLAG_COLOR[flag]};vertical-align:middle"></span>')
 
+# ---------- card info (Anki's "Card Info" window) ----------
+def fmt_span(secs):
+    """Time span the way Anki writes it: 45 seconds, 10 minutes, 3 days, 2.1 months, 1.5 years."""
+    secs = abs(secs)
+    for unit, size in (("year", 365 * 86400), ("month", 30 * 86400), ("day", 86400),
+                       ("hour", 3600), ("minute", 60)):
+        if secs >= size:
+            v = round(secs / size, 1 if unit in ("year", "month") else 0)
+            v = int(v) if v == int(v) else v
+            return f"{v} {unit}{'' if v == 1 else 's'}"
+    v = round(secs) if secs >= 1 else round(secs, 1)
+    return f"{v} second{'' if v == 1 else 's'}"
+
+def fmt_date(ts, with_time=False):
+    return time.strftime("%Y-%m-%d %H:%M" if with_time else "%Y-%m-%d", time.localtime(ts))
+
+REVIEW_KIND = {0: ("Learn", "lrn"), 1: ("Review", "rev"), 2: ("Relearn", "lrn"), 3: ("Filtered", "new"),
+               4: ("Manual", "muted"), 5: ("Rescheduled", "muted")}
+RATING = {0: ("—", "muted"), 1: ("Again", "again"), 2: ("Hard", "hard"), 3: ("Good", "good"), 4: ("Easy", "easy")}
+
+def card_info_html(col, cid):
+    """Card statistics from the engine's card_stats call, laid out like Anki's Card Info."""
+    s = col.card_stats_data(cid)
+    card = col.get_card(cid)
+    rows = [("Added", fmt_date(s.added))]
+    if s.HasField("first_review"): rows.append(("First review", fmt_date(s.first_review)))
+    if s.HasField("latest_review"): rows.append(("Latest review", fmt_date(s.latest_review)))
+    if s.interval: rows.append(("Interval", fmt_span(s.interval * 86400)))
+    fsrs = bool(col.get_config("fsrs", False)) and s.HasField("memory_state")
+    if fsrs:
+        rows.append(("Stability", fmt_span(s.memory_state.stability * 86400)))
+        rows.append(("Difficulty", f"{round((s.memory_state.difficulty - 1) / 9 * 100)}%"))
+        if s.HasField("fsrs_retrievability"):
+            rows.append(("Retrievability", f"{round(s.fsrs_retrievability * 100)}%"))
+    elif s.ease:
+        rows.append(("Ease", f"{s.ease // 10}%"))
+    paused = " (suspended)" if card.queue == -1 else " (buried)" if card.queue in (-2, -3) else ""
+    if s.HasField("due_date"):
+        rows.append(("Due", fmt_date(s.due_date) + paused))
+    elif s.HasField("due_position"):
+        rows.append(("Position", f"{s.due_position}{paused}"))
+    rows += [("Reviews", str(s.reviews)), ("Lapses", str(s.lapses))]
+    if s.reviews:
+        rows += [("Average time", fmt_span(s.average_secs)), ("Total time", fmt_span(s.total_secs))]
+    rows += [("Card type", s.card_type), ("Note type", s.notetype),
+             ("Deck", s.deck + (f" (from {s.original_deck})" if s.HasField("original_deck") else "")),
+             ("Preset", s.preset), ("Card ID", str(s.card_id)), ("Note ID", str(s.note_id))]
+    if s.custom_data: rows.append(("Custom data", s.custom_data))
+    stats = "".join(f'<tr><th>{k}</th><td>{html.escape(v)}</td></tr>' for k, v in rows)
+    has_mem = bool(col.get_config("fsrs", False)) and any(e.HasField("memory_state") for e in s.revlog)
+    hist = []
+    for e in s.revlog:   # newest first, as in Anki
+        kind, kcls = REVIEW_KIND.get(e.review_kind, ("?", "muted"))
+        rating, rcls = RATING.get(e.button_chosen, ("?", "muted"))
+        ivl = fmt_span(e.interval) if e.interval else "—"
+        if has_mem:
+            extra = (f'<td>{fmt_span(e.memory_state.stability * 86400)}</td>'
+                     f'<td>{round((e.memory_state.difficulty - 1) / 9 * 100)}%</td>') \
+                if e.HasField("memory_state") else "<td>—</td><td>—</td>"
+        else:
+            extra = f'<td>{e.ease // 10}%</td>' if e.ease else "<td>—</td>"
+        hist.append(f"""<tr><td style="white-space:nowrap">{fmt_date(e.time, True)}</td>
+<td class="{kcls}">{kind}</td><td style="color:var(--{rcls})">{rating}</td><td>{ivl}</td>{extra}
+<td>{fmt_span(e.taken_secs) if e.taken_secs else '—'}</td></tr>""")
+    cols = "<th>Stability</th><th>Difficulty</th>" if has_mem else "<th>Ease</th>"
+    history = (f"""<div style="overflow-x:auto"><table class="hist"><tr><th>Date</th><th>Type</th><th>Rating</th>
+<th>Interval</th>{cols}<th>Time</th></tr>{''.join(hist)}</table></div>""" if hist
+               else '<p class="muted">This card has not been reviewed yet.</p>')
+    return stats, history, s.note_id
+
+@app.get("/card/{cid}/info", response_class=HTMLResponse)
+def card_info(request: Request, cid: int, back: str = ""):
+    user = current_user(request)
+    if not user: return need_login(request)
+    if not back.startswith("/") or back.startswith("//"): back = ""
+    with collection(user) as col:
+        try:
+            card = col.get_card(cid)
+        except Exception:
+            set_flash(request, "!That card was not found.")
+            return RedirectResponse("/browse", 303)
+        stats, history, nid = card_info_html(col, cid)
+        title = strip_html(card.question())[:80]
+    back_btn = f'<a class="btn" href="{html.escape(back)}">← Back</a>' if back else ""
+    edit_back = quote(f"/card/{cid}/info" + (f"?back={back}" if back else ""), safe="/")
+    body = f"""<style>.info th{{width:40%;font-size:15px}}.info td,.info th{{padding:9px 8px}}
+.hist td,.hist th{{padding:9px 8px;font-size:15px}}</style>
+<div class="row" style="justify-content:space-between;margin-bottom:12px">{back_btn}
+<a class="btn" href="/edit/{nid}?back={edit_back}">Edit note</a></div>
+<div class="box"><h2 style="margin-top:0">Card info</h2>
+<p class="muted" style="margin-top:-6px">{html.escape(title) or '(empty)'}</p>
+<table class="info">{stats}</table></div>
+<div class="box"><h3 style="margin-top:0">Review history</h3>{history}</div>"""
+    return page("Card info", body, user, "browse", take_flash(request))
+
 @app.get("/study/{did}", response_class=HTMLResponse)
 def study(request: Request, did: int):
     user = current_user(request)
@@ -420,6 +515,7 @@ onclick="answer({i + 1})"><small>{html.escape(labels[i])}</small><br>{n}</button
 <button type="button" onclick="act('suspend_note')">Suspend note <kbd>!</kbd></button>
 <button type="button" onclick="setDue()">Set due date… <kbd>Ctrl+Shift+D</kbd></button>
 <button type="button" onclick="resetCard()">Reset to new… <kbd>Ctrl+Alt+N</kbd></button>
+<button type="button" onclick="info()">Card info <kbd>I</kbd></button>
 <div class="flags">{flag_btns}</div></div></details>"""
     body = f"""<style>main{{max-width:900px}}#frame{{width:100%;min-height:55vh;border:1px solid var(--line);
 border-radius:14px;background:var(--card)}}.bar{{position:sticky;bottom:0;padding:12px 0;background:var(--bg)}}
@@ -472,11 +568,13 @@ async function act(a,arg){{document.querySelector('.more').open=false;
  else setTimeout(()=>location.replace('/study/{did}'),500);}}
 function setDue(){{const d=prompt('Show this card in how many days? (0 = today, 3-7 = random range, add ! to also set the interval)','1');
  if(d!==null&&d.trim())act('due',d.trim());}}
+function info(){{location.href='/card/{card.id}/info?back=/study/{did}';}}
 function resetCard(){{if(confirm('Reset this card to new? Its review history is kept.'))act('reset');}}
 function key(e){{if(e.ctrlKey&&!e.altKey&&/^Digit[1-7]$/.test(e.code)){{e.preventDefault();act('flag',+e.code.slice(5));return;}}
  if(e.ctrlKey&&e.shiftKey&&e.code==='KeyD'){{e.preventDefault();setDue();return;}}
  if(e.ctrlKey&&e.altKey&&e.code==='KeyN'){{e.preventDefault();resetCard();return;}}
  if(e.ctrlKey||e.metaKey||e.altKey)return;
+ if(e.key==='i'||e.key==='I'){{e.preventDefault();info();return;}}
  const k={{'-':'bury','=':'bury_note','@':'suspend','!':'suspend_note','*':'mark'}}[e.key];
  if(k){{e.preventDefault();act(k);return;}}
  if(e.key===' '||e.key==='Enter'){{if(e.target.tagName==='BUTTON'||e.target.tagName==='SUMMARY')return;
@@ -643,7 +741,8 @@ onchange="this.form.submit()">{flag_opts}</select></form>
 <form method="post" action="/card/{card.id}/action" class="row" style="gap:6px"><input type="hidden" name="action" value="due">
 <input type="hidden" name="back" value="{eb}"><input name="arg" placeholder="days, e.g. 1 or 3-7" style="width:150px"
 aria-label="Due in days" required><button>Set due</button></form>
-{btn(card.id, "reset", "Reset to new", "danger", confirm="Reset this card to new?")}</div></div>""")
+{btn(card.id, "reset", "Reset to new", "danger", confirm="Reset this card to new?")}
+<a class="btn" href="/card/{card.id}/info?back={html.escape(quote(back, safe='/'))}">Card info</a></div></div>""")
     first = note.cards()[0].id if note.cards() else 0
     mark = btn(first, "mark", "★ Unmark note" if marked else "☆ Mark note") if first else ""
     return f"""<style>.cardrow{{padding:12px 14px;border:1px solid var(--line);border-radius:12px;margin-top:10px}}</style>
@@ -724,7 +823,8 @@ def browse(request: Request, q: str = "", page_no: int = 0):
 {html.escape(strip_html(n.fields[0])[:90]) or '(empty)'}</a><span class="muted" style="font-size:14px">
 {html.escape(strip_html(n.fields[1])[:90]) if len(n.fields) > 1 else ''}</span></td>
 <td class="muted" style="font-size:14px">{html.escape(deck)}</td><td class="muted state" style="font-size:14px;white-space:nowrap">
-{flag_dot(flag)}{' <span title="Marked" style="color:#c98a16">★</span>' if marked else ''} {due}</td></tr>""")
+{flag_dot(flag)}{' <span title="Marked" style="color:#c98a16">★</span>' if marked else ''} {due}</td>
+<td>{f'<a class="info-link" title="Card info" aria-label="Card info" href="/card/{cards[0].id}/info?back={html.escape(quote("/browse?q=" + q, safe="/"))}">ⓘ</a>' if cards else ''}</td></tr>""")
     nav = ""
     if total > per:
         last = (total - 1) // per
@@ -734,8 +834,9 @@ def browse(request: Request, q: str = "", page_no: int = 0):
     body = f"""<div class="box"><form class="row"><input name="q" value="{html.escape(q)}" style="flex:1"
 placeholder="Search (Anki syntax: deck:French is:due tag:verb front:*cat*)"><button>Search</button></form>
 <p class="muted" style="margin-bottom:0">{total} notes{(' · ' + html.escape(err)) if err else ''}</p></div>
-<style>{BROWSE_ROW_CSS}</style>
-<div class="box"><table><tr><th>Note</th><th>Deck</th><th>State</th></tr>{''.join(rows)}</table></div>{nav}"""
+<style>{BROWSE_ROW_CSS}.info-link{{display:inline-flex;align-items:center;justify-content:center;min-width:44px;
+min-height:44px;font-size:20px;color:var(--muted);text-decoration:none;border-radius:10px}}.info-link:hover{{background:var(--bg)}}</style>
+<div class="box"><table><tr><th>Note</th><th>Deck</th><th>State</th><th></th></tr>{''.join(rows)}</table></div>{nav}"""
     return page("Browse", body, user, "browse", take_flash(request))
 
 # ---------- import ----------
