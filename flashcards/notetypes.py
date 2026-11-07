@@ -407,7 +407,7 @@ Also {{{{FrontSide}}}}, {{{{Tags}}}}, {{{{Deck}}}}, {{{{Card}}}}, {{{{type:Field
 <script>
 (function(){{const f=document.getElementById('tform');let tm=null,dirty=false;
 function fit(fr){{try{{const d=fr.contentDocument;fr.style.height=Math.max(160,d.documentElement.scrollHeight+4)+'px';}}catch(e){{}}}}
-['pq','pa'].forEach(i=>{{const fr=document.getElementById(i);fr.addEventListener('load',()=>fit(fr));fit(fr);}});
+['pq','pa'].forEach(i=>{{const fr=document.getElementById(i);fr.addEventListener('load',()=>fit(fr));fr.addEventListener('fc-resize',()=>fit(fr));fit(fr);}});
 function upd(){{clearTimeout(tm);tm=setTimeout(async()=>{{try{{const r=await fetch('/notetypes/{ntid}/preview',
 {{method:'POST',body:new FormData(f)}});if(!r.ok)return;const j=await r.json();
 document.getElementById('pq').srcdoc=j.q;document.getElementById('pa').srcdoc=j.a;}}catch(e){{}}}},300);}}

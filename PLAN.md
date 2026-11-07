@@ -14,7 +14,7 @@ If an item fails twice, mark it `- [~]` with a one-line reason under it and move
 
 ## Content
 - [x] Note type manager: list, add (from stock types: Basic, Basic+reversed, Basic optional reversed, Basic type-in, Cloze, Image Occlusion), rename, delete, field manager (add, rename, reorder, delete, sort field, font), card template editor (front/back HTML, styling CSS, add/remove card types) with live preview. Change note type of existing notes.
-- [ ] Rich editor for Add/Edit: bold/italic/underline, sub/superscript, colour, lists, clear formatting, cloze buttons (Ctrl+Shift+C new number, Ctrl+Shift+Alt+C same number), paste images, record/attach audio, MathJax (\( \) and \[ \]) rendering in cards, sticky fields, duplicate-first-field warning, preview button.
+- [x] Rich editor for Add/Edit: bold/italic/underline, sub/superscript, colour, lists, clear formatting, cloze buttons (Ctrl+Shift+C new number, Ctrl+Shift+Alt+C same number), paste images, record/attach audio, MathJax (\( \) and \[ \]) rendering in cards, sticky fields, duplicate-first-field warning, preview button.
 - [ ] Image occlusion: create from an uploaded image, draw rectangles (and ellipses) to hide, "hide all guess one" and "hide one guess one", using Anki's image occlusion note type so cards are compatible with real Anki. Edit masks later.
 - [ ] Import: CSV/TSV/TXT (choose delimiter, note type, deck, field mapping, HTML on/off, duplicate handling, tags), .colpkg (whole collection, with a clear "this replaces everything" confirm), .apkg options (update existing notes / scheduling). Export: whole collection .colpkg, notes as text/CSV.
 - [ ] Media: check media (unused/missing files), delete unused, media served for audio/video/images in cards.

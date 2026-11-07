@@ -354,7 +354,17 @@ def type_answer(info, text):
             f'font-size:{int(info["size"])}px">{TYPE_SLOT}</span>')
     return TYPE_PAT.sub(lambda m: slot, text)
 
+# MathJax for \( \) and \[ \] in cards, set up like Anki's reviewer (MathJax 3; loaded only when
+# a card uses it). Once typeset, the frame gets an "fc-resize" event so its page can resize it.
+MATHJAX_PAT = re.compile(r"\\[(\[]")
+MATHJAX = r"""<script>window.MathJax={tex:{displayMath:[["\\[","\\]"]],processEscapes:false,
+processEnvironments:false,processRefs:false},startup:{typeset:true,pageReady(){
+return MathJax.startup.defaultPageReady().then(function(){try{window.frameElement&&
+window.frameElement.dispatchEvent(new Event("fc-resize"))}catch(e){}})}}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg-full.js"></script>"""
+
 def card_doc(inner, night=False):
+    mj = MATHJAX if MATHJAX_PAT.search(inner) else ""
     return f"""<!doctype html><html class="{'night_mode' if night else ''}"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><base href="/media/">
 <style>html,body{{margin:0;padding:0}}body{{padding:20px;font-family:-apple-system,system-ui,sans-serif}}
@@ -367,7 +377,7 @@ code#typeans{{display:inline-block;width:auto;border:0;padding:0;font-family:inh
 @media (prefers-color-scheme:dark){{body{{background:#232325;color:#f2f2f2}}.card{{background:transparent!important;color:#f2f2f2!important}}
 input#typeans{{background:#161617;color:#f2f2f2;border-color:#555}}.replay-button circle{{fill:#333;stroke:#777}}
 .replay-button path{{fill:#ddd}}}}
-</style></head><body class="card">{inner}</body></html>"""
+</style>{mj}</head><body class="card">{inner}</body></html>"""
 
 # ---------- card actions (suspend, bury, flag, mark, reset, set due date) ----------
 FLAGS = [(0, "No flag", "transparent"), (1, "Red", "#e5484d"), (2, "Orange", "#f08c00"), (3, "Green", "#2f9e44"),
@@ -662,7 +672,7 @@ onclick="edit();return false;">Edit</a>{menu}</div></div>
 const Q={qdoc},A={adoc},t0=Date.now()-{elapsed},fr=document.getElementById('frame');let shown=false,busy=false,quiet={js(resume)};
 const AV={js(av)},HAS_TYPE={js(has_type)},SLOT={js(TYPE_SLOT)};let typed={js(typed[:1000])};
 function fit(){{try{{const h=fr.contentDocument.documentElement.scrollHeight;fr.style.height=Math.max(h+10,window.innerHeight*.55)+'px'}}catch(e){{}}}}
-function load(d){{fr.srcdoc=d;}} fr.onload=()=>{{fit();setTimeout(fit,300);
+function load(d){{fr.srcdoc=d;}} fr.addEventListener('fc-resize',fit);fr.onload=()=>{{fit();setTimeout(fit,300);
  fr.contentDocument.addEventListener('keydown',key);
  const ti=fr.contentDocument.getElementById('typeans');if(ti&&ti.tagName==='INPUT'){{ti.value=typed;ti.focus();}}}};
 // ---- audio: a small queue player, like Anki's (sound files and TTS) ----
@@ -782,100 +792,7 @@ def media(request: Request, name: str):
         return Response(status_code=404)
     return FileResponse(path)
 
-# ---------- add / edit ----------
-def note_form(col, nt, did, values=None, action="/add", extra=""):
-    values = values or {}
-    decks = sorted(col.decks.all_names_and_ids(), key=lambda d: d.name)
-    nts = col.models.all_names_and_ids()
-    deck_opts = "".join(f'<option value="{d.id}" {"selected" if d.id == did else ""}>{html.escape(d.name)}</option>'
-                        for d in decks)
-    nt_opts = "".join(f'<option value="{m.id}" {"selected" if m.id == nt["id"] else ""}>{html.escape(m.name)}</option>'
-                      for m in nts)
-    fields = "".join(f"""<label>{html.escape(f['name'])}</label>
-<textarea name="f{i}">{html.escape(values.get(f['name'], ''))}</textarea>""" for i, f in enumerate(nt["flds"]))
-    hint = ""
-    if nt["type"] == 1:
-        hint = '<p class="muted" style="font-size:14px">Cloze: wrap hidden text like {{c1::answer}}, use c2, c3 for more cards.</p>'
-    return f"""<form method="post" action="{action}" enctype="multipart/form-data">
-<div class="row"><div style="flex:1"><label>Type</label><select name="ntid" onchange="location='/add?nt='+this.value+'&did='+this.form.did.value">{nt_opts}</select></div>
-<div style="flex:1"><label>Deck</label><select name="did">{deck_opts}</select></div></div>
-{fields}{hint}<label>Tags (space separated)</label><input name="tags" value="{html.escape(values.get('_tags', ''))}">
-<label>Image or audio (optional, added to the end of the first field)</label><input type="file" name="upload" accept="image/*,audio/*">
-<p class="row">{extra}<button class="primary">Save</button></p></form>"""
-
-@app.get("/add", response_class=HTMLResponse)
-def add_page(request: Request, nt: int = 0, did: int = 0):
-    user = current_user(request)
-    if not user: return need_login(request)
-    with collection(user) as col:
-        model = col.models.get(nt) if nt else col.models.current()
-        did = did or col.get_config("curDeck", 1)
-        body = (f'<div class="box"><div class="row" style="justify-content:space-between"><h2 style="margin:0">Add card</h2>'
-                f'<a class="btn" href="/notetypes/{model["id"]}/cards">Cards…</a></div>{note_form(col, model, did)}</div>')
-    return page("Add", body, user, "add", take_flash(request))
-
-async def save_upload(col, upload):
-    if upload is None or not upload.filename:
-        return ""
-    data = await upload.read()
-    if not data:
-        return ""
-    name = col.media.write_data(os.path.basename(upload.filename), data)
-    if (upload.content_type or "").startswith("audio"):
-        return f"[sound:{name}]"
-    return f'<img src="{html.escape(name)}">'
-
-@app.post("/add")
-async def add(request: Request):
-    user = current_user(request)
-    if not user: return need_login(request)
-    form = await request.form()
-    with collection(user) as col:
-        model = col.models.get(int(form["ntid"]))
-        note = col.new_note(model)
-        for i, f in enumerate(model["flds"]):
-            note[f["name"]] = str(form.get(f"f{i}", ""))
-        extra = await save_upload(col, form.get("upload"))
-        if extra:
-            first = model["flds"][0]["name"]
-            note[first] += extra
-        note.tags = str(form.get("tags", "")).split()
-        did = int(form["did"])
-        try:
-            if not note.fields[0].strip() and not extra:
-                raise ValueError("The first field is empty.")
-            col.add_note(note, did)
-            col.models.set_current(model)
-            col.set_config("curDeck", did)
-            set_flash(request, f"Added {len(note.cards())} card(s).")
-        except Exception as e:
-            set_flash(request, f"!Could not add: {e}")
-    return RedirectResponse(f"/add?nt={model['id']}&did={did}", 303)
-
-@app.get("/edit/{nid}", response_class=HTMLResponse)
-def edit_page(request: Request, nid: int, back: str = "/browse"):
-    user = current_user(request)
-    if not user: return need_login(request)
-    back = safe_back(back)
-    qback = quote(back, safe="/")   # back may carry its own ?query (e.g. the study screen's card and side)
-    with collection(user) as col:
-        note = col.get_note(nid)
-        model = note.note_type()
-        values = {k: v for k, v in note.items()}
-        values["_tags"] = " ".join(note.tags)
-        did = note.cards()[0].did if note.cards() else 1
-        form = note_form(col, model, did, values, action=html.escape(f"/edit/{nid}?back={qback}"),
-                         extra=f'<a class="btn" href="{html.escape(back)}">Cancel</a>')
-        form = form.replace('onchange="location=', 'disabled data-x="')
-        cards_box = cards_panel(col, note, f"/edit/{nid}?back={qback}")
-    body = f"""<div class="box"><h2 style="margin-top:0">Edit note</h2>{form}
-<form method="post" action="/note/{nid}/delete?back={html.escape(qback)}" onsubmit="return confirm('Delete this note and its cards?')">
-<button class="danger">Delete note</button></form>
-<p class="row" style="margin-bottom:0"><a class="btn" href="/notetypes/{model['id']}/cards?nid={nid}">Cards…</a>
-<a class="btn" href="/notetypes/{model['id']}/fields">Fields…</a>
-<a class="btn" href="/notetypes/change?nids={nid}&amp;back={html.escape(qback)}">Change note type</a></p></div>{cards_box}"""
-    return page("Edit", body, user, "browse", take_flash(request))
-
+# ---------- add / edit (routes in flashcards/editor.py) ----------
 def cards_panel(col, note, back):
     """Per-card actions (as in Anki's browser): suspend, bury, flag, reset, set due date; plus mark note."""
     marked = note.has_tag("marked")
@@ -915,28 +832,6 @@ aria-label="Due in days" required><button>Set due</button></form>
     return f"""<style>.cardrow{{padding:12px 14px;border:1px solid var(--line);border-radius:12px;margin-top:10px}}</style>
 <div class="box"><div class="row" style="justify-content:space-between"><h3 style="margin:0">Cards</h3>{mark}</div>
 {''.join(rows)}</div>"""
-
-@app.post("/edit/{nid}")
-async def edit(request: Request, nid: int, back: str = "/browse"):
-    user = current_user(request)
-    if not user: return need_login(request)
-    back = safe_back(back)
-    form = await request.form()
-    with collection(user) as col:
-        note = col.get_note(nid)
-        model = note.note_type()
-        for i, f in enumerate(model["flds"]):
-            note[f["name"]] = str(form.get(f"f{i}", ""))
-        extra = await save_upload(col, form.get("upload"))
-        if extra:
-            note[model["flds"][0]["name"]] += extra
-        note.tags = str(form.get("tags", "")).split()
-        col.update_note(note)
-        new_did = int(form.get("did", 0) or 0)
-        if new_did:
-            col.set_deck([c.id for c in note.cards()], new_did)
-    set_flash(request, "Saved.")
-    return RedirectResponse(back, 303)
 
 @app.post("/note/{nid}/delete")
 def note_delete(request: Request, nid: int, back: str = "/browse"):
@@ -1420,3 +1315,5 @@ from flashcards import filtered_decks  # noqa: E402
 app.include_router(filtered_decks.router)
 from flashcards import notetypes  # noqa: E402
 app.include_router(notetypes.router)
+from flashcards import editor  # noqa: E402
+app.include_router(editor.router)
