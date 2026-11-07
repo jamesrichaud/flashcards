@@ -284,25 +284,99 @@ def deck_export(request: Request, did: int):
     return FileResponse(out, filename=f"{safe}.apkg", media_type="application/octet-stream")
 
 # ---------- study ----------
+VIDEO_EXTS = (".mp4", ".webm", ".mov", ".mkv", ".ogv", ".m4v", ".avi", ".mpg", ".mpeg")
+PLAY_SVG = ('<svg viewBox="0 0 64 64" width="40" height="40"><circle cx="32" cy="32" r="29" fill="#fff" '
+            'stroke="#888" stroke-width="2"/><path d="M24 18l22 14-22 14z" fill="#555"/></svg>')
+
+def av_list(tags):
+    """Anki's [sound:]/TTS tags as playable items for the study screen's player."""
+    out = []
+    for t in tags:
+        if isinstance(t, SoundOrVideoTag):
+            video = t.filename.lower().endswith(VIDEO_EXTS)
+            out.append({"t": "video" if video else "sound", "src": "/media/" + quote(t.filename)})
+        else:   # TTSTag: spoken by the browser's speech synthesis
+            out.append({"t": "tts", "text": t.field_text, "lang": t.lang.replace("_", "-"),
+                        "speed": t.speed or 1.0})
+    return out
+
 def render_side(col, card, text):
-    """Turn Anki card HTML into a self-contained document (media + audio)."""
-    tags = card.question_av_tags() + card.answer_av_tags()
+    """Turn Anki card HTML into a self-contained document: [anki:play] markers become
+    Anki-style replay buttons (videos are shown inline)."""
+    lists = {"q": card.question_av_tags(), "a": card.answer_av_tags()}
     def audio(m):
         side, idx = m.group(1), int(m.group(2))
-        lst = card.question_av_tags() if side == "q" else card.answer_av_tags()
-        if idx < len(lst) and isinstance(lst[idx], SoundOrVideoTag):
-            f = html.escape(lst[idx].filename)
-            return f'<audio controls src="/media/{f}" style="max-width:100%"></audio>'
-        return ""
-    text = re.sub(r"\[anki:play:(q|a):(\d+)\]", audio, text)
-    return text
+        lst = lists[side]
+        if idx >= len(lst):
+            return ""
+        tag = lst[idx]
+        if isinstance(tag, SoundOrVideoTag) and tag.filename.lower().endswith(VIDEO_EXTS):
+            return (f'<video controls playsinline src="/media/{html.escape(quote(tag.filename))}" '
+                    f'style="max-width:100%"></video>')
+        return (f'<a class="replay-button soundLink" href="#" title="Play" '
+                f'onclick="parent.fcPlay&&parent.fcPlay(\'{side}\',{idx});return false;">{PLAY_SVG}</a>')
+    return re.sub(r"\[anki:play:(q|a):(\d+)\]", audio, text)
+
+# ---------- type in the answer ({{type:Field}}), ported from Anki's reviewer ----------
+TYPE_PAT = re.compile(r"\[\[type:(.+?)\]\]")
+TYPE_SLOT = "<!--typeans-->"
+
+def type_answer_info(col, card, qtext):
+    """None if the card has no type-in box; otherwise what to compare against."""
+    m = TYPE_PAT.search(qtext)
+    if not m:
+        return None
+    fld, cloze, combining = m.group(1), 0, True
+    if fld.startswith("cloze:"):
+        cloze, fld = card.ord + 1, fld.split(":", 1)[1]
+    if fld.startswith("nc:"):
+        combining, fld = False, fld.split(":", 1)[1]
+    for f in card.note_type()["flds"]:
+        if f["name"] == fld:
+            expected = card.note()[fld]
+            if cloze:
+                expected = col.extract_cloze_for_typing(expected, cloze)
+            return {"expected": expected, "font": f.get("font", "Arial"), "size": f.get("size", 20),
+                    "combining": combining, "field": fld, "cloze": bool(cloze)}
+    return {"expected": None, "field": fld, "cloze": bool(cloze)}
+
+def type_question(info, text):
+    if not info:
+        return text
+    if info["expected"] is None:
+        warn = ("Please run Tools&gt;Empty Cards" if info["cloze"]
+                else f"Type answer: unknown field {html.escape(info['field'])}")
+        return TYPE_PAT.sub(warn, text)
+    if not info["expected"]:
+        return TYPE_PAT.sub("", text)
+    box = (f'<center><input type="text" id="typeans" autocomplete="off" autocapitalize="off" spellcheck="false" '
+           f'style="font-family:\'{html.escape(info["font"])}\';font-size:{int(info["size"])}px"></center>')
+    return TYPE_PAT.sub(lambda m: box, text)
+
+def type_answer(info, text):
+    """Answer side: leave a slot that the page fills with the engine's comparison."""
+    if not info or not info["expected"]:
+        return TYPE_PAT.sub("", text)
+    had_hr = "<hr id=answer>" in text
+    if had_hr:
+        text = text.replace("<hr id=answer>", "")
+    slot = (("<hr id=answer>" if had_hr else "") + f'<span style="font-family:\'{html.escape(info["font"])}\';'
+            f'font-size:{int(info["size"])}px">{TYPE_SLOT}</span>')
+    return TYPE_PAT.sub(lambda m: slot, text)
 
 def card_doc(inner, night=False):
     return f"""<!doctype html><html class="{'night_mode' if night else ''}"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><base href="/media/">
 <style>html,body{{margin:0;padding:0}}body{{padding:20px;font-family:-apple-system,system-ui,sans-serif}}
 img{{max-width:100%;height:auto}}.cloze{{font-weight:bold;color:#2f6fde}}
-@media (prefers-color-scheme:dark){{body{{background:#232325;color:#f2f2f2}}.card{{background:transparent!important;color:#f2f2f2!important}}}}
+.replay-button{{display:inline-block;vertical-align:middle;margin:4px}}.replay-button svg{{display:block}}
+#typeans{{width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #bbb;border-radius:10px}}
+code#typeans{{display:inline-block;width:auto;border:0;padding:0;font-family:inherit}}
+.typeGood{{background-color:#afa;color:black}}.typeBad{{background-color:#faa;color:black}}
+.typeMissed{{background-color:#ccc;color:black}}
+@media (prefers-color-scheme:dark){{body{{background:#232325;color:#f2f2f2}}.card{{background:transparent!important;color:#f2f2f2!important}}
+input#typeans{{background:#161617;color:#f2f2f2;border-color:#555}}.replay-button circle{{fill:#333;stroke:#777}}
+.replay-button path{{fill:#ddd}}}}
 </style></head><body class="card">{inner}</body></html>"""
 
 # ---------- card actions (suspend, bury, flag, mark, reset, set due date) ----------
@@ -468,7 +542,7 @@ def card_info(request: Request, cid: int, back: str = ""):
         stats, history, nid = card_info_html(col, cid)
         title = strip_html(card.question())[:80]
     back_btn = f'<a class="btn" href="{html.escape(back)}">← Back</a>' if back else ""
-    edit_back = quote(f"/card/{cid}/info" + (f"?back={back}" if back else ""), safe="/")
+    edit_back = quote(f"/card/{cid}/info" + (f"?back={quote(back, safe='/')}" if back else ""), safe="/")
     body = f"""<style>.info th{{width:40%;font-size:15px}}.info td,.info th{{padding:9px 8px}}
 .hist td,.hist th{{padding:9px 8px;font-size:15px}}</style>
 <div class="row" style="justify-content:space-between;margin-bottom:12px">{back_btn}
@@ -479,28 +553,67 @@ def card_info(request: Request, cid: int, back: str = ""):
 <div class="box"><h3 style="margin-top:0">Review history</h3>{history}</div>"""
     return page("Card info", body, user, "browse", take_flash(request))
 
+def js(value):
+    """JSON for inline <script>: no '<' so card HTML or URL text can't close the script tag."""
+    return json.dumps(value).replace("<", "\\u003c")
+
+def study_undo_label(col):
+    label = col.undo_status().undo
+    return label if any(k in (label or "").lower() for k in STUDY_UNDOABLE) else ""
+
+def fmt_wait(secs):
+    mins = max(1, round(secs / 60))
+    return f"{mins} minute{'s' if mins != 1 else ''}" if mins < 60 else fmt_span(secs)
+
+def study_waiting(request, user, did, secs, undo_label, flash):
+    """Anki's 'learning cards due later' state: nothing to show yet, but cards answered
+    Again come back in this session once their step is up, so wait and reload."""
+    undo = (f'<form method="post" action="/study/{did}/undo"><button>Undo {html.escape(undo_label)}</button></form>'
+            if undo_label else "")
+    body = f"""<div class="row" style="justify-content:space-between;margin-bottom:10px">
+<a href="/deck/{did}" class="btn">\u2190 Deck</a>{undo}</div>
+<div class="box" style="text-align:center"><h2 style="margin-top:0">Nothing due right now</h2>
+<p>The next learning card will be ready in <b id="wait">{fmt_wait(secs)}</b>.</p>
+<p class="muted">Keep this screen open and it will carry on by itself.</p>
+<a class="btn primary" href="/study/{did}">Check again</a></div>
+<script>setTimeout(()=>location.replace('/study/{did}'),{(int(secs) + 1) * 1000});</script>"""
+    return page("Study", body, user, "decks", flash)
+
 @app.get("/study/{did}", response_class=HTMLResponse)
-def study(request: Request, did: int):
+def study(request: Request, did: int, cid: int = 0, shown: int = 0, ms: int = 0, typed: str = ""):
     user = current_user(request)
     if not user: return need_login(request)
+    flash = take_flash(request)
     with collection(user) as col:
         select_deck(col, did)
         q = col.sched.get_queued_cards()
         if not q.cards:
-            set_flash(request, "Congratulations! You have finished this deck for now.")
+            info = col.sched.congratulations_info()
+            if 0 < info.secs_until_next_learn < 86400 and info.learn_remaining:
+                return study_waiting(request, user, did, info.secs_until_next_learn, study_undo_label(col), flash)
+            done = "Congratulations! You have finished this deck for now."
+            set_flash(request, f"{flash.lstrip('!')} {done}" if flash else done)
             return RedirectResponse(f"/deck/{did}", 303)
         qc = q.cards[0]
         card = col.get_card(qc.card.id)
         labels = [re.sub(r'[\u2068\u2069]', '', l) for l in col.sched.describe_next_states(qc.states)]
-        question = render_side(col, card, card.question())
-        answer = render_side(col, card, card.answer())
+        qtext = card.question()
+        tinfo = type_answer_info(col, card, qtext)
+        question = render_side(col, card, type_question(tinfo, qtext))
+        answer = render_side(col, card, type_answer(tinfo, card.answer()))
+        has_type = bool(tinfo and tinfo["expected"])
         counts = (q.new_count, q.learning_count, q.review_count)
         kind = {0: "new", 1: "lrn", 2: "rev", 3: "lrn"}.get(card.queue, "rev")
-        undo_label = col.undo_status().undo
-        if not any(k in (undo_label or "").lower() for k in STUDY_UNDOABLE):
-            undo_label = ""
+        undo_label = study_undo_label(col)
         flag, marked = card.user_flag(), card.note().has_tag("marked")
-    qdoc, adoc = json.dumps(card_doc(question)), json.dumps(card_doc(answer))
+        conf = col.decks.config_dict_for_deck_id(card.current_deck_id())
+        av = {"q": av_list(card.question_av_tags()), "a": av_list(card.answer_av_tags()),
+              "autoplay": bool(conf.get("autoplay", True)), "replayq": bool(conf.get("replayq", True))}
+    # Coming back from Edit or Card info: same card, same side, timer carries on.
+    resume = cid == card.id
+    start_shown = resume and bool(shown)
+    elapsed = max(0, min(ms, 3_600_000)) if resume else 0
+    qdoc, adoc = js(card_doc(question)), js(card_doc(answer))
     names = ["Again", "Hard", "Good", "Easy"]
     colors = ["again", "hard", "good", "easy"]
     btns = "".join(f"""<button class="ans" style="border-color:var(--{c});color:var(--{c})"
@@ -519,7 +632,11 @@ onclick="answer({i + 1})"><small>{html.escape(labels[i])}</small><br>{n}</button
 <button type="button" onclick="setDue()">Set due date… <kbd>Ctrl+Shift+D</kbd></button>
 <button type="button" onclick="resetCard()">Reset to new… <kbd>Ctrl+Alt+N</kbd></button>
 <button type="button" onclick="info()">Card info <kbd>I</kbd></button>
+<button type="button" onclick="replay()">Replay audio <kbd>R</kbd></button>
 <div class="flags">{flag_btns}</div></div></details>"""
+    has_audio = any(x["t"] != "video" for x in av["q"] + av["a"])
+    replay_btn = (f'<button type="button" id="replay" onclick="replay()" title="Replay audio (R)" '
+                  f'aria-label="Replay audio">🔊</button>' if has_audio else "")
     body = f"""<style>main{{max-width:900px}}#frame{{width:100%;min-height:55vh;border:1px solid var(--line);
 border-radius:14px;background:var(--card)}}.bar{{position:sticky;bottom:0;padding:12px 0;background:var(--bg)}}
 .ans{{flex:1;min-height:64px;font-weight:600}}.ans small{{font-weight:400;opacity:.8}}
@@ -543,7 +660,8 @@ style="background:{FLAG_COLOR[flag]};{'' if flag else 'display:none'}"></span>
 <span class="new {'cur' if kind == 'new' else ''}">{counts[0]}</span>
 <span class="lrn {'cur' if kind == 'lrn' else ''}">{counts[1]}</span>
 <span class="rev {'cur' if kind == 'rev' else ''}">{counts[2]}</span></div>
-<div class="row">{undo}<a class="btn" href="/edit/{card.nid}?back=/study/{did}">Edit</a>{menu}</div></div>
+<div class="row">{undo}{replay_btn}<a class="btn" href="/edit/{card.nid}?back=/study/{did}"
+onclick="edit();return false;">Edit</a>{menu}</div></div>
 <div id="toast"></div>
 <iframe id="frame" sandbox="allow-same-origin allow-scripts"></iframe>
 <form id="f" method="post" action="/study/{did}/answer"><input type="hidden" name="card_id" value="{card.id}">
@@ -551,14 +669,37 @@ style="background:{FLAG_COLOR[flag]};{'' if flag else 'display:none'}"></span>
 <div class="bar"><button id="show" class="primary" style="width:100%;min-height:64px" onclick="show()">Show answer</button>
 <div id="btns" class="row" style="display:none;flex-wrap:nowrap">{btns}</div></div>
 <script>
-const Q={qdoc},A={adoc},t0=Date.now(),fr=document.getElementById('frame');let shown=false;
+const Q={qdoc},A={adoc},t0=Date.now()-{elapsed},fr=document.getElementById('frame');let shown=false,busy=false,quiet={js(resume)};
+const AV={js(av)},HAS_TYPE={js(has_type)},SLOT={js(TYPE_SLOT)};let typed={js(typed[:1000])};
 function fit(){{try{{const h=fr.contentDocument.documentElement.scrollHeight;fr.style.height=Math.max(h+10,window.innerHeight*.55)+'px'}}catch(e){{}}}}
 function load(d){{fr.srcdoc=d;}} fr.onload=()=>{{fit();setTimeout(fit,300);
- fr.contentDocument.addEventListener('keydown',key);}};
-function show(){{if(shown)return;shown=true;load(A);document.getElementById('show').style.display='none';
- document.getElementById('btns').style.display='flex';}}
-function answer(r){{if(!shown)return;document.getElementById('rating').value=r;
+ fr.contentDocument.addEventListener('keydown',key);
+ const ti=fr.contentDocument.getElementById('typeans');if(ti&&ti.tagName==='INPUT'){{ti.value=typed;ti.focus();}}}};
+// ---- audio: a small queue player, like Anki's (sound files and TTS) ----
+let playing=[],cur=null;
+function stopAudio(){{playing=[];if(cur&&cur.pause)cur.pause();cur=null;
+ if(window.speechSynthesis)speechSynthesis.cancel();}}
+function playList(list){{stopAudio();playing=list.filter(x=>x.t!=='video');next();}}
+function next(){{const it=playing.shift();if(!it){{cur=null;return;}}
+ if(it.t==='tts'){{if(!window.speechSynthesis){{next();return;}}const u=new SpeechSynthesisUtterance(it.text);
+  if(it.lang)u.lang=it.lang;u.rate=it.speed||1;u.onend=next;u.onerror=next;cur=null;speechSynthesis.speak(u);return;}}
+ cur=new Audio(it.src);cur.onended=next;cur.onerror=next;
+ cur.play().catch(e=>{{if(e.name==='NotAllowedError'){{playing=[];toast('Tap 🔊 to play the audio');}}else next();}});}}
+function fcPlay(side,i){{const it=AV[side][i];if(it)playList([it]);}}
+function sideTags(){{return shown?(AV.replayq?AV.q.concat(AV.a):AV.a):AV.q;}}
+function replay(){{document.querySelector('.more').open=false;playList(sideTags());}}
+async function show(){{if(shown||busy)return;busy=true;let d=A;
+ if(HAS_TYPE){{try{{const ti=fr.contentDocument.getElementById('typeans');if(ti&&ti.tagName==='INPUT')typed=ti.value;}}catch(e){{}}
+  let out='';try{{const fd=new FormData();fd.append('card_id','{card.id}');fd.append('typed',typed);
+   out=(await(await fetch('/study/{did}/typeans',{{method:'POST',body:fd}})).json()).html;}}catch(e){{}}
+  d=A.replace(SLOT,()=>out);}}
+ shown=true;busy=false;load(d);document.getElementById('show').style.display='none';
+ document.getElementById('btns').style.display='flex';if(AV.autoplay&&!quiet)playList(AV.a);quiet=false;}}
+function answer(r){{if(!shown)return;stopAudio();document.getElementById('rating').value=r;
  document.getElementById('ms').value=Date.now()-t0;document.getElementById('f').submit();}}
+function here(){{if(!shown){{try{{const ti=fr.contentDocument.getElementById('typeans');if(ti&&ti.tagName==='INPUT')typed=ti.value;}}catch(e){{}}}}
+ return '?cid={card.id}'+(shown?'&shown=1':'')+'&ms='+(Date.now()-t0)+(typed?'&typed='+encodeURIComponent(typed):'');}}
+function edit(){{stopAudio();location.href='/edit/{card.nid}?back=/study/{did}'+encodeURIComponent(here());}}
 const FC={json.dumps(FLAG_COLOR)};
 function toast(m){{const t=document.getElementById('toast');t.textContent=m;t.style.opacity=1;
  clearTimeout(t._h);t._h=setTimeout(()=>t.style.opacity=0,1600);}}
@@ -571,21 +712,42 @@ async function act(a,arg){{document.querySelector('.more').open=false;
  else setTimeout(()=>location.replace('/study/{did}'),500);}}
 function setDue(){{const d=prompt('Show this card in how many days? (0 = today, 3-7 = random range, add ! to also set the interval)','1');
  if(d!==null&&d.trim())act('due',d.trim());}}
-function info(){{location.href='/card/{card.id}/info?back=/study/{did}';}}
+function info(){{stopAudio();location.href='/card/{card.id}/info?back=/study/{did}'+encodeURIComponent(here());}}
 function resetCard(){{if(confirm('Reset this card to new? Its review history is kept.'))act('reset');}}
-function key(e){{if(e.ctrlKey&&!e.altKey&&/^Digit[1-7]$/.test(e.code)){{e.preventDefault();act('flag',+e.code.slice(5));return;}}
+function key(e){{const tg=e.target.tagName;
+ if(tg==='INPUT'||tg==='TEXTAREA'||tg==='SELECT'){{if(e.key==='Enter'&&e.target.id==='typeans'){{e.preventDefault();show();}}return;}}
+ if(e.ctrlKey&&!e.altKey&&/^Digit[1-7]$/.test(e.code)){{e.preventDefault();act('flag',+e.code.slice(5));return;}}
  if(e.ctrlKey&&e.shiftKey&&e.code==='KeyD'){{e.preventDefault();setDue();return;}}
  if(e.ctrlKey&&e.altKey&&e.code==='KeyN'){{e.preventDefault();resetCard();return;}}
  if(e.ctrlKey||e.metaKey||e.altKey)return;
  if(e.key==='i'||e.key==='I'){{e.preventDefault();info();return;}}
+ if(e.key==='r'||e.key==='R'||e.key==='F5'){{e.preventDefault();replay();return;}}
+ if(e.key==='e'||e.key==='E'){{e.preventDefault();edit();return;}}
  const k={{'-':'bury','=':'bury_note','@':'suspend','!':'suspend_note','*':'mark'}}[e.key];
  if(k){{e.preventDefault();act(k);return;}}
  if(e.key===' '||e.key==='Enter'){{if(e.target.tagName==='BUTTON'||e.target.tagName==='SUMMARY')return;
   e.preventDefault();shown?answer(3):show();}}
  else if('1234'.includes(e.key)&&e.key.length===1)answer(+e.key);}}
-document.addEventListener('keydown',key);load(Q);
+document.addEventListener('keydown',key);
+if({js(start_shown)})show();else{{load(Q);if(AV.autoplay&&!quiet)playList(AV.q);quiet=false;}}
+const FL={js(flash.lstrip('!'))};if(FL)toast(FL);
 </script>"""
     return page("Study", body, user, "decks")
+
+@app.post("/study/{did}/typeans")
+def study_typeans(request: Request, did: int, card_id: int = Form(...), typed: str = Form("")):
+    """Compare a typed answer with the card's {{type:Field}} using the engine (as Anki's reviewer does)."""
+    user = current_user(request)
+    if not user: return Response(status_code=401)
+    with collection(user) as col:
+        try:
+            card = col.get_card(card_id)
+        except Exception:
+            return {"html": ""}
+        info = type_answer_info(col, card, card.question())
+        if not info or not info["expected"]:
+            return {"html": ""}
+        return {"html": col.compare_answer(info["expected"], typed[:5000], info["combining"])}
 
 @app.post("/study/{did}/answer")
 def study_answer(request: Request, did: int, card_id: int = Form(...), rating: int = Form(...), ms: int = Form(0)):
@@ -599,8 +761,15 @@ def study_answer(request: Request, did: int, card_id: int = Form(...), rating: i
         if q.cards and q.cards[0].card.id == card_id and rating in ratings:
             card = col.get_card(card_id)
             card.timer_started = time.time() - max(0, min(ms, 3_600_000)) / 1000
-            col.sched.answer_card(col.sched.build_answer(card=card, states=q.cards[0].states,
-                                                          rating=ratings[rating]))
+            ans = col.sched.build_answer(card=card, states=q.cards[0].states, rating=ratings[rating])
+            leech = col.sched.state_is_leech(ans.new_state)
+            col.sched.answer_card(ans)
+            if leech:   # same notice as Anki's reviewer
+                card.load()
+                msg = "Card was a leech."
+                if card.queue < 0:
+                    msg += " It has been suspended."
+                set_flash(request, msg)
     return RedirectResponse(f"/study/{did}", 303)
 
 @app.post("/study/{did}/undo")
@@ -696,19 +865,20 @@ async def add(request: Request):
 def edit_page(request: Request, nid: int, back: str = "/browse"):
     user = current_user(request)
     if not user: return need_login(request)
-    if not back.startswith("/"): back = "/browse"
+    back = safe_back(back)
+    qback = quote(back, safe="/")   # back may carry its own ?query (e.g. the study screen's card and side)
     with collection(user) as col:
         note = col.get_note(nid)
         model = note.note_type()
         values = {k: v for k, v in note.items()}
         values["_tags"] = " ".join(note.tags)
         did = note.cards()[0].did if note.cards() else 1
-        form = note_form(col, model, did, values, action=f"/edit/{nid}?back={back}",
+        form = note_form(col, model, did, values, action=html.escape(f"/edit/{nid}?back={qback}"),
                          extra=f'<a class="btn" href="{html.escape(back)}">Cancel</a>')
         form = form.replace('onchange="location=', 'disabled data-x="')
-        cards_box = cards_panel(col, note, f"/edit/{nid}?back={quote(back, safe='/')}")
+        cards_box = cards_panel(col, note, f"/edit/{nid}?back={qback}")
     body = f"""<div class="box"><h2 style="margin-top:0">Edit note</h2>{form}
-<form method="post" action="/note/{nid}/delete?back={html.escape(back)}" onsubmit="return confirm('Delete this note and its cards?')">
+<form method="post" action="/note/{nid}/delete?back={html.escape(qback)}" onsubmit="return confirm('Delete this note and its cards?')">
 <button class="danger">Delete note</button></form></div>{cards_box}"""
     return page("Edit", body, user, "browse", take_flash(request))
 
@@ -756,7 +926,7 @@ aria-label="Due in days" required><button>Set due</button></form>
 async def edit(request: Request, nid: int, back: str = "/browse"):
     user = current_user(request)
     if not user: return need_login(request)
-    if not back.startswith("/"): back = "/browse"
+    back = safe_back(back)
     form = await request.form()
     with collection(user) as col:
         note = col.get_note(nid)
@@ -781,8 +951,7 @@ def note_delete(request: Request, nid: int, back: str = "/browse"):
     with collection(user) as col:
         col.remove_notes([nid])
     set_flash(request, "Note deleted.")
-    if back.startswith("/study") or not back.startswith("/"): back = back if back.startswith("/") else "/browse"
-    return RedirectResponse(back, 303)
+    return RedirectResponse(safe_back(back), 303)
 
 # ---------- browse ----------
 def strip_html(s):
