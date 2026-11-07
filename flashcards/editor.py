@@ -86,8 +86,8 @@ border-radius:12px;background:var(--card);position:sticky;top:0;z-index:4}
 .tb button,.tb .sw{min-width:44px;min-height:44px;padding:6px 10px;font-size:16px;border-radius:9px}
 .tb .sep{width:1px;align-self:stretch;background:var(--line);margin:4px 2px}
 .tb .sw{display:inline-flex;align-items:center;gap:2px;border:1px solid var(--line);padding:0 0 0 4px}
-.tb .sw button{border:0;min-width:36px;padding:6px}
-.tb input[type=color]{width:34px;height:34px;padding:0;border:0;background:none;border-radius:6px;cursor:pointer}
+.tb .sw button{border:0;min-width:44px;padding:6px}
+.tb input[type=color]{width:44px;height:44px;padding:0;border:0;background:none;border-radius:6px;cursor:pointer}
 .tb button.recording{background:var(--again);border-color:var(--again);color:#fff}
 #ed-msg{font-size:14px;color:var(--muted);min-height:20px;margin:2px 0 0}
 #ed-msg.err{color:var(--again);background:none}

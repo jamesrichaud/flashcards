@@ -29,7 +29,15 @@ All data is kept in `./data`, so back that folder up.
 ## Let a friend reach it
 Use an HTTPS tunnel instead of opening router ports, for example Tailscale Funnel
 (`tailscale funnel 8000`) or a Cloudflare Tunnel. Then, on the iPad, open the link in Safari,
-tap Share, and choose "Add to Home Screen".
+tap Share, and choose "Add to Home Screen". It opens full screen with its own icon. On a
+Chromebook, use Chrome's "Install" (or "Create shortcut… > Open as window").
+
+Over HTTPS (or on localhost), a page that can't reach the server shows a "You're offline" page with
+Try again instead of the browser's error, and a red bar appears while the device has no connection.
+Studying itself needs the connection: answers are saved on the server straight away.
+
+For iPads, Preferences has "Tap the card to answer": tap the card to show the answer, then tap its
+left half for Again or its right half for Good (the answer buttons still work).
 
 ## Using it on several devices
 Every iPad, Chromebook or computer that logs in as the same person uses the same cards on the

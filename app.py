@@ -150,8 +150,9 @@ def page(title, body, user=None, active="", flash=""):
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Flashcards"><link rel="manifest" href="/manifest.json">
-<title>{html.escape(title)}</title><style>{CSS}</style></head><body>
-<header><b>Flashcards</b>{nav}</header><main>{fl}{body}</main>{undo_mod.SCRIPT + sync_mod.live_script(user) if user else ""}</body></html>""")
+{touch_mod.head_html(theme)}<title>{html.escape(title)}</title><style>{CSS}{touch_mod.CSS}</style></head><body>
+<header><b>Flashcards</b>{nav}</header><main>{fl}{body}</main>{undo_mod.SCRIPT + sync_mod.live_script(user) if user else ""}
+{touch_mod.BODY_SCRIPT}</body></html>""")
 
 def take_flash(request):
     return request.session.pop("flash", "")
@@ -159,10 +160,7 @@ def take_flash(request):
 def set_flash(request, msg):
     request.session["flash"] = msg
 
-@app.get("/manifest.json")
-def manifest():
-    return {"name": "Flashcards", "short_name": "Flashcards", "start_url": "/", "display": "standalone",
-            "background_color": "#f6f6f4", "theme_color": "#2f6fde"}
+# Manifest, icons, offline page and HTML error pages: flashcards/touch.py
 
 # ---------- auth ----------
 @app.get("/login", response_class=HTMLResponse)
@@ -577,6 +575,7 @@ def study(request: Request, did: int, cid: int = 0, shown: int = 0, ms: int = 0,
         rprefs = col.get_preferences().reviewing
         show_counts, show_times = rprefs.show_remaining_due_counts, rprefs.show_intervals_on_buttons
         theme = theme_of(col)
+        tap = touch_mod.tap_zones(col)
     timebox_start(request, did)
     # Coming back from Edit or Card info: same card, same side, timer carries on.
     resume = cid == card.id
@@ -619,8 +618,12 @@ padding:8px;width:280px;box-shadow:0 8px 30px rgba(0,0,0,.18);display:flex;flex-
 .flags button{{justify-content:flex-start;gap:8px;padding:9px 10px;font-size:15px}}
 .dot{{display:inline-block;width:12px;height:12px;border-radius:50%}}
 #flag{{width:14px;height:14px}}#mark{{color:#c98a16;font-size:20px}}
-#toast{{position:fixed;left:50%;bottom:110px;transform:translateX(-50%);background:var(--ink);color:var(--bg);
-padding:10px 18px;border-radius:10px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:20}}</style>
+#toast{{position:fixed;left:50%;bottom:calc(110px + env(safe-area-inset-bottom));transform:translateX(-50%);
+background:var(--ink);color:var(--bg);
+padding:10px 18px;border-radius:10px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:20}}
+html,body{{overscroll-behavior:none}}.bar{{padding-bottom:max(12px,env(safe-area-inset-bottom))}}
+.ans,#show{{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}}
+#taphint{{font-size:13px;text-align:center;margin:0 0 6px}}</style>
 <div class="row" style="justify-content:space-between;margin-bottom:10px">
 <a href="/deck/{did}" class="btn">← Deck</a>
 <div class="counts"><span id="flag" class="dot" title="{FLAG_NAME[flag]} flag"
@@ -635,16 +638,31 @@ onclick="edit();return false;">Edit</a>{menu}</div></div>
 <iframe id="frame" sandbox="allow-same-origin allow-scripts"></iframe>
 <form id="f" method="post" action="/study/{did}/answer"><input type="hidden" name="card_id" value="{card.id}">
 <input type="hidden" name="rating" id="rating"><input type="hidden" name="ms" id="ms"></form>
-<div class="bar"><button id="show" class="primary" style="width:100%;min-height:64px" onclick="show()">Show answer</button>
+<div class="bar">{'<p id="taphint" class="muted">Tap the card to show the answer</p>' if tap else ''}<button id="show" class="primary" style="width:100%;min-height:64px" onclick="show()">Show answer</button>
 <div id="btns" class="row" style="display:none;flex-wrap:nowrap">{btns}</div></div>
 <script>
 const Q={qdoc},A={adoc},t0=Date.now()-{elapsed},fr=document.getElementById('frame');let shown=false,busy=false,quiet={js(resume)};
-const AV={js(av)},HAS_TYPE={js(has_type)},SLOT={js(TYPE_SLOT)};let typed={js(typed[:1000])};
+const AV={js(av)},HAS_TYPE={js(has_type)},SLOT={js(TYPE_SLOT)},TAP={js(tap)};let typed={js(typed[:1000])},sent=false,shownAt=0;
 function fit(){{try{{const h=fr.contentDocument.documentElement.scrollHeight;fr.style.height=Math.max(h+10,window.innerHeight*.55)+'px'}}catch(e){{}}}}
 function load(d){{fr.srcdoc=d;}} fr.addEventListener('fc-resize',fit);fr.onload=()=>{{fit();setTimeout(fit,300);
  fr.contentDocument.addEventListener('keydown',key);
  fr.contentDocument.addEventListener('keydown',e=>window.fcUndoKey&&window.fcUndoKey(e));
- const ti=fr.contentDocument.getElementById('typeans');if(ti&&ti.tagName==='INPUT'){{ti.value=typed;ti.focus();}}}};
+ const ti=fr.contentDocument.getElementById('typeans');if(ti&&ti.tagName==='INPUT'){{ti.value=typed;ti.focus();}}
+ if(TAP)tapZones(fr.contentDocument);}};
+// ---- optional tap zones: a tap shows the answer, then left half = Again, right half = Good.
+// Only a short, still tap counts: scrolls, swipes, long presses and taps on links/inputs don't.
+function tapZones(doc){{let sx=0,sy=0,st=0,on=false;
+ doc.addEventListener('pointerdown',e=>{{on=e.isPrimary&&(e.pointerType!=='mouse'||e.button===0);
+  sx=e.clientX;sy=e.clientY;st=Date.now();}},true);
+ doc.addEventListener('pointercancel',()=>{{on=false;}},true);
+ doc.addEventListener('pointerup',e=>{{if(!on)return;on=false;
+  if(Math.abs(e.clientX-sx)>10||Math.abs(e.clientY-sy)>10||Date.now()-st>600)return;
+  const t=e.target;
+  if(t&&t.closest&&t.closest('a,button,input,textarea,select,label,audio,video,summary,[contenteditable],[onclick]'))return;
+  const sel=doc.getSelection&&doc.getSelection();if(sel&&!sel.isCollapsed)return;
+  if(!shown){{show();return;}}
+  if(Date.now()-shownAt<400)return;  // a quick double tap must not show and answer at once
+  answer(e.clientX<doc.documentElement.clientWidth/2?1:3);}},true);}}
 // ---- audio: a small queue player, like Anki's (sound files and TTS) ----
 let playing=[],cur=null;
 function stopAudio(){{playing=[];if(cur&&cur.pause)cur.pause();cur=null;
@@ -663,9 +681,10 @@ async function show(){{if(shown||busy)return;busy=true;let d=A;
   let out='';try{{const fd=new FormData();fd.append('card_id','{card.id}');fd.append('typed',typed);
    out=(await(await fetch('/study/{did}/typeans',{{method:'POST',body:fd}})).json()).html;}}catch(e){{}}
   d=A.replace(SLOT,()=>out);}}
- shown=true;busy=false;load(d);document.getElementById('show').style.display='none';
+ shown=true;shownAt=Date.now();busy=false;load(d);
+ const th=document.getElementById('taphint');if(th)th.textContent='Tap the card: left half Again · right half Good';document.getElementById('show').style.display='none';
  document.getElementById('btns').style.display='flex';if(AV.autoplay&&!quiet)playList(AV.a);quiet=false;}}
-function answer(r){{if(!shown)return;stopAudio();document.getElementById('rating').value=r;
+function answer(r){{if(!shown||sent)return;sent=true;stopAudio();document.getElementById('rating').value=r;
  document.getElementById('ms').value=Date.now()-t0;document.getElementById('f').submit();}}
 function here(){{if(!shown){{try{{const ti=fr.contentDocument.getElementById('typeans');if(ti&&ti.tagName==='INPUT')typed=ti.value;}}catch(e){{}}}}
  return '?cid={card.id}'+(shown?'&shown=1':'')+'&ms='+(Date.now()-t0)+(typed?'&typed='+encodeURIComponent(typed):'');}}
@@ -675,7 +694,9 @@ function toast(m){{const t=document.getElementById('toast');t.textContent=m;t.st
  clearTimeout(t._h);t._h=setTimeout(()=>t.style.opacity=0,1600);}}
 async function act(a,arg){{document.querySelector('.more').open=false;
  const fd=new FormData();fd.append('action',a);fd.append('arg',arg??'');
- const r=await(await fetch('/card/{card.id}/action',{{method:'POST',body:fd,headers:{{'X-Requested-With':'fetch'}}}})).json();
+ let r;try{{r=await(await fetch('/card/{card.id}/action',
+  {{method:'POST',body:fd,headers:{{'X-Requested-With':'fetch'}}}})).json();}}
+ catch(e){{toast("Couldn't reach the server. Check the connection and try again.");return;}}
  toast(r.msg);if(!r.ok)return;
  if(['flag','mark'].includes(a)){{if(r.stamp&&window.fcStampSeen)fcStampSeen(r.stamp);const f=document.getElementById('flag');f.style.display=r.flag?'':'none';
   f.style.background=FC[r.flag];document.getElementById('mark').style.display=r.marked?'':'none';}}
@@ -702,6 +723,7 @@ document.addEventListener('keydown',key);
 if({js(start_shown)})show();else{{load(Q);if(AV.autoplay&&!quiet)playList(AV.q);quiet=false;}}
 const FL={js(flash.lstrip('!'))};if(FL)toast(FL);
 window.FC_AFTER_UNDO='/study/{did}';
+window.addEventListener('pageshow',e=>{{if(e.persisted)sent=false;}});
 </script>"""
     return page("Study", body, user, "decks")
 
@@ -1001,7 +1023,7 @@ a.sort{{color:var(--muted);text-decoration:none}}a.sort.on{{color:var(--ink);fon
 .chk{{display:flex;gap:8px;align-items:center;margin:0;padding:8px 6px;color:var(--ink);font-size:15px;min-height:44px}}
 .colgrid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:0 12px}}
 details.panel>summary{{cursor:pointer;list-style:none;display:inline-block}}details.panel>summary::-webkit-details-marker{{display:none}}
-.bar{{position:sticky;top:62px;z-index:4}}.arg{{display:none}}.arg.show{{display:flex}}.bar select,.bar input[type=text],
+.bar{{position:sticky;top:calc(65px + env(safe-area-inset-top));z-index:4}}.arg{{display:none}}.arg.show{{display:flex}}.bar select,.bar input[type=text],
 .bar input[type=number]{{width:auto;min-height:44px}}</style>
 <div class="box"><form class="row" action="/browse"><input name="q" value="{eq}" style="flex:1;min-width:220px"
 placeholder="Search (Anki syntax: deck:French is:due tag:verb front:*cat*)"><button>Search</button></form>
@@ -1283,3 +1305,5 @@ from flashcards import maintenance  # noqa: E402  (collection() uses it for the 
 app.include_router(maintenance.router)
 from flashcards import sync as sync_mod  # noqa: E402  (page() adds its live-refresh script)
 app.include_router(sync_mod.router)
+from flashcards import touch as touch_mod  # noqa: E402  (page() adds its head tags; error pages)
+app.include_router(touch_mod.router)

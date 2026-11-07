@@ -9,7 +9,8 @@ to every device and to Anki itself after a sync:
   - Show remaining card count
   - Show next review time above answer buttons
 The theme (follow system / light / dark) is this app's own setting, kept in the collection's
-config under `flashcardsTheme`. Labels come from the engine's translations.
+config under `flashcardsTheme`; so is "tap the card to answer" (`flashcardsTapZones`, see
+flashcards/touch.py). Labels come from the engine's translations.
 """
 import html, re
 
@@ -77,6 +78,8 @@ min-height:44px;cursor:pointer}}.opt input{{width:22px;height:22px;flex:none;mar
 <div class="box"><h3>{t(tr.preferences_review)}</h3>
 {check("show_counts", r.show_remaining_due_counts, t(tr.preferences_show_remaining_card_count))}
 {check("show_times", r.show_intervals_on_buttons, t(tr.preferences_show_next_review_time_above_answer))}
+{check("tap_zones", core.touch_mod.tap_zones(col), "Tap the card to answer",
+       "Tap the card to show the answer, then tap its left half for Again or its right half for Good.")}
 </div>
 <div class="box"><h3>{t(tr.preferences_appearance)}</h3>
 <label>{t(tr.preferences_theme)}</label>{theme_opts}
@@ -119,5 +122,8 @@ async def preferences_save(request: Request):
         col.set_preferences(p)
         if theme in core.THEMES and theme != core.theme_of(col):
             col.set_config(core.THEME_KEY, theme)
+        tap = form.get("tap_zones") == "1"
+        if tap != core.touch_mod.tap_zones(col):
+            col.set_config(core.touch_mod.TAP_KEY, tap)
     core.set_flash(request, "Preferences saved.")
     return RedirectResponse("/preferences", 303)
