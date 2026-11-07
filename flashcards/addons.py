@@ -54,11 +54,19 @@ _errors = {}    # id -> last error text
 
 
 # ---------- discovery (no code is run) ----------
+BUNDLED_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "bundled_addons")
+
+
+def search_dirs():
+    """The server's own add-on folder first (so a local copy wins), then the add-ons shipped with the app."""
+    return [addons_dir(), BUNDLED_DIR]
+
+
 def source_path(aid):
-    d = addons_dir()
-    for p in (os.path.join(d, aid + ".py"), os.path.join(d, aid, "__init__.py")):
-        if os.path.isfile(p):
-            return p
+    for d in search_dirs():
+        for p in (os.path.join(d, aid + ".py"), os.path.join(d, aid, "__init__.py")):
+            if os.path.isfile(p):
+                return p
     return None
 
 
@@ -71,14 +79,14 @@ def mtime(path):
 
 
 def addon_ids():
-    d = addons_dir()
-    if not os.path.isdir(d):
-        return []
     out = set()
-    for f in os.listdir(d):
-        aid = f[:-3] if f.endswith(".py") else f
-        if ID_PAT.fullmatch(aid) and not aid.startswith(("_", ".")) and source_path(aid):
-            out.add(aid)
+    for d in search_dirs():
+        if not os.path.isdir(d):
+            continue
+        for f in os.listdir(d):
+            aid = f[:-3] if f.endswith(".py") else f
+            if ID_PAT.fullmatch(aid) and not aid.startswith(("_", ".")) and source_path(aid):
+                out.add(aid)
     return sorted(out, key=str.lower)
 
 
@@ -260,7 +268,9 @@ class Dispatcher:
         if sub is None:
             raise HTTPException(404)    # the app's normal 404 page
         session = scope.get("session") or {}
-        if session.get("user") not in core.load_users():
+        public = getattr(sys.modules.get(module_name(aid)), "PUBLIC_PATHS", ())
+        rest = (m.group(2) or "/") if m else "/"
+        if session.get("user") not in core.load_users() and rest not in public:
             await RedirectResponse("/login", 303)(scope, receive, send)
             return
         inner = dict(scope, root_path="", path=path, app=sub)

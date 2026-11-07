@@ -114,6 +114,11 @@ def home(request):
 MENU = [("Open", "/")]                     # buttons on the Add-ons page
 ```
 
+Six add-ons come with the app in `bundled_addons/`, all off until turned on in Settings → Add-ons:
+Edit Field During Review, Speed Focus Mode, Read Aloud (text-to-speech), Pop-up Dictionary,
+Study Streaks & Achievements, and AnkiConnect (for Yomitan and other tools; each person makes their
+own key on the add-on's page). Add-ons are turned on for the whole server; each person has their own settings.
+
 A worked example is in `addons_examples/answer_counter.py`; copy it into `data/addons/` to try
 it. An add-on that raises an error is skipped (studying carries on) and the error is shown on
 the Add-ons page; an edited file is picked up without a restart. Add-ons run with the server's

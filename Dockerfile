@@ -4,6 +4,7 @@ RUN pip install --no-cache-dir anki fastapi "uvicorn[standard]" python-multipart
 COPY app.py .
 COPY flashcards ./flashcards
 COPY addons_examples ./addons_examples
+COPY bundled_addons ./bundled_addons
 ENV DATA_DIR=/data
 VOLUME /data
 EXPOSE 8000

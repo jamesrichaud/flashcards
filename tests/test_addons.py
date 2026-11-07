@@ -6,6 +6,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 from fastapi.testclient import TestClient
 import app as webapp
+from flashcards import addons as _addons_mod
+_addons_mod.BUNDLED_DIR = tempfile.mkdtemp()   # this file tests the server's own add-on folder; bundled ones: test_bundled_addons.py
 from flashcards import addons
 
 ok = lambda m: print("PASS", m)
