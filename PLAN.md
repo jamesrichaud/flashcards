@@ -27,7 +27,7 @@ If an item fails twice, mark it `- [~]` with a one-line reason under it and move
 - [x] Check database (engine `check_database`), empty cards report and delete, backups: automatic daily backup of each user's collection to `data/users/<name>/backups/` keeping 30, and restore from the settings page.
 - [x] Sync across devices: since every device uses the web app, confirm two browsers logged in as the same user always see the same state; add AnkiWeb-compatible sync server option documented in README (Anki's built-in `anki.syncserver`) so real Anki apps (AnkiDroid, desktop) can also sync to this server. Test with a second collection syncing via the engine's sync client.
 - [x] iPad and Chromebook polish: touch targets ≥44px, tap left/right halves of card for answers optional setting, swipe-safe, works in Safari "Add to Home Screen" (manifest + apple-touch-icon PNG), offline-safe error pages.
-- [ ] Add-ons: a simple server-side add-on system (Python files in `data/addons/` with hooks: card render filter, after answer, extra page routes) and an Add-ons page to enable/disable. Document that desktop Anki add-ons do not run here.
+- [x] Add-ons: a simple server-side add-on system (Python files in `data/addons/` with hooks: card render filter, after answer, extra page routes) and an Add-ons page to enable/disable. Document that desktop Anki add-ons do not run here.
 
 ## Final
 - [ ] Full regression: run all tests, take Playwright screenshots of every page at iPad (820x1180) and Chromebook (1366x768) sizes into `shots/`, fix anything broken or ugly, update README feature list.

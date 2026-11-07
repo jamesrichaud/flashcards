@@ -562,8 +562,8 @@ def study(request: Request, did: int, cid: int = 0, shown: int = 0, ms: int = 0,
         labels = [re.sub(r'[\u2068\u2069]', '', l) for l in col.sched.describe_next_states(qc.states)]
         qtext = card.question()
         tinfo = type_answer_info(col, card, qtext)
-        question = render_side(col, card, type_question(tinfo, qtext))
-        answer = render_side(col, card, type_answer(tinfo, card.answer()))
+        question = render_side(col, card, type_question(tinfo, addons.card_render(col, card, "question", qtext)))
+        answer = render_side(col, card, type_answer(tinfo, addons.card_render(col, card, "answer", card.answer())))
         has_type = bool(tinfo and tinfo["expected"])
         counts = (q.new_count, q.learning_count, q.review_count)
         kind = {0: "new", 1: "lrn", 2: "rev", 3: "lrn"}.get(card.queue, "rev")
@@ -757,6 +757,7 @@ def study_answer(request: Request, did: int, card_id: int = Form(...), rating: i
             ans = col.sched.build_answer(card=card, states=q.cards[0].states, rating=ratings[rating])
             leech = col.sched.state_is_leech(ans.new_state)
             col.sched.answer_card(ans)
+            addons.after_answer(col, card, rating)   # enabled add-ons (flashcards/addons.py); never raises
             msgs = []
             if leech:   # same notice as Anki's reviewer
                 card.load()
@@ -1219,6 +1220,9 @@ def settings(request: Request):
 <div class="box row" style="justify-content:space-between"><div><h3 style="margin:0">Preferences</h3>
 <span class="muted">Next day starts at, learn ahead, timebox, review screen, theme.</span></div>
 <a class="btn" href="/preferences">Preferences</a></div>
+<div class="box row" style="justify-content:space-between"><div><h3 style="margin:0">Add-ons</h3>
+<span class="muted">Small server add-ons for this app. Desktop Anki add-ons don't run here.</span></div>
+<a class="btn" href="/addons">Add-ons</a></div>
 <div class="box row" style="justify-content:space-between"><h3 style="margin:0">Note types</h3>
 <a class="btn" href="/notetypes">Manage note types</a></div>
 <div class="box row" style="justify-content:space-between"><div><h3 style="margin:0">Media</h3>
@@ -1307,3 +1311,6 @@ from flashcards import sync as sync_mod  # noqa: E402  (page() adds its live-ref
 app.include_router(sync_mod.router)
 from flashcards import touch as touch_mod  # noqa: E402  (page() adds its head tags; error pages)
 app.include_router(touch_mod.router)
+from flashcards import addons  # noqa: E402  (study screen calls its card_render/after_answer hooks)
+app.include_router(addons.router)
+app.mount("/addon", addons.Dispatcher())

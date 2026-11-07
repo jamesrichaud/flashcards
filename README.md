@@ -17,6 +17,7 @@ and .apkg import/export behave exactly like Anki. Made for iPad and Chromebook u
 - Deck options: new cards per day, reviews per day, desired retention
 - Stats: today, last 7 days, collection totals
 - FSRS on/off, password change, adding more people
+- Server-side add-ons (card render, after answer, extra pages) with an Add-ons page; desktop Anki add-ons don't run here
 - All your devices share the same cards; sync with AnkiDroid, AnkiMobile and desktop Anki through Anki's own sync server (or AnkiWeb)
 
 ## Run it on the home server
@@ -72,6 +73,39 @@ Without Docker: `SYNC_USER1=james:pw SYNC_BASE=./data/syncserver python3 -m anki
 then use `http://<computer>:8080/` as the address. Over the internet, put the sync server behind
 HTTPS as well (the same tunnel as the app). Leaving the address blank on the Sync page syncs with
 AnkiWeb instead. Only a sync key is kept (in `data/users/<name>/sync.json`), never the password.
+
+## Add-ons
+Desktop Anki add-ons (the ones on ankiweb.net) **don't run here**: they are written for Anki's
+desktop window (Qt, `aqt`), which this web app doesn't have. The app recognises them and won't
+turn them on.
+
+Instead it has its own small add-ons: Python files in `data/addons/` (`<name>.py`, or a folder
+with an `__init__.py`). They start switched off; turn them on or off in Settings → Add-ons
+(this applies to everyone using the server). An add-on can define any of:
+
+```python
+NAME = "My add-on"                         # shown on the Add-ons page
+DESCRIPTION = "What it does"               # or the file's docstring
+
+def card_render(text, card, kind, col):    # kind: "question" or "answer"
+    return text                            # change the card's HTML before it is shown
+
+def after_answer(col, card, rating):       # rating: 1 Again, 2 Hard, 3 Good, 4 Easy
+    ...
+
+from fastapi import APIRouter
+from flashcards import addons
+router = APIRouter()                       # extra pages at /addon/<name>/... (login needed)
+@router.get("/")
+def home(request):
+    return addons.page(request, "Title", "<div class='box'>Hello</div>")
+MENU = [("Open", "/")]                     # buttons on the Add-ons page
+```
+
+A worked example is in `addons_examples/answer_counter.py`; copy it into `data/addons/` to try
+it. An add-on that raises an error is skipped (studying carries on) and the error is shown on
+the Add-ons page; an edited file is picked up without a restart. Add-ons run with the server's
+full rights, so only install files you trust.
 
 ## Tests
 ```

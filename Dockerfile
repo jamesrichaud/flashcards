@@ -3,6 +3,7 @@ WORKDIR /app
 RUN pip install --no-cache-dir anki fastapi "uvicorn[standard]" python-multipart itsdangerous
 COPY app.py .
 COPY flashcards ./flashcards
+COPY addons_examples ./addons_examples
 ENV DATA_DIR=/data
 VOLUME /data
 EXPOSE 8000

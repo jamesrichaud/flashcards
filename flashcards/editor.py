@@ -19,6 +19,7 @@ from anki.consts import MODEL_CLOZE
 from anki.notes import NoteFieldsCheckResult as Check
 
 import app as core
+from flashcards import addons  # card_render hook for previews
 
 router = APIRouter()
 
@@ -563,8 +564,8 @@ async def check_route(request: Request):
         return note_check(col, note)
 
 
-def preview_doc(col, card, text):
-    text = core.render_side(col, card, text)
+def preview_doc(col, card, text, kind="question"):
+    text = core.render_side(col, card, addons.card_render(col, card, kind, text))
     text = core.TYPE_PAT.sub(lambda m: '<center><input type="text" id="typeans" placeholder="(typing the answer)" '
                                        'disabled></center>', text)
     return core.card_doc(text, core.theme_of(col))
@@ -594,11 +595,12 @@ async def preview_route(request: Request):
             q = card.question()
             if "#front-of-card-is-blank" in q and nt["type"] != MODEL_CLOZE:
                 continue   # this card type would not be made for the note
-            cards.append({"name": name, "q": preview_doc(col, card, q), "a": preview_doc(col, card, card.answer())})
+            cards.append({"name": name, "q": preview_doc(col, card, q),
+                          "a": preview_doc(col, card, card.answer(), "answer")})
         if not cards:
             card = note.ephemeral_card(ords[0])
             cards.append({"name": names[0], "q": preview_doc(col, card, card.question()),
-                          "a": preview_doc(col, card, card.answer())})
+                          "a": preview_doc(col, card, card.answer(), "answer")})
         return {"cards": cards}
 
 
