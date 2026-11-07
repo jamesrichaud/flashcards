@@ -176,6 +176,16 @@ r = c.get(f"/deck/{e}/custom")
 assert re.search(r'value="cram" disabled', r.text) and "no cards" in r.text
 ok("a deck without cards only offers the limit options")
 
+# --- the empty Default deck is left out of the engine's deck tree: no crash, a message ---
+with webapp.collection("tester") as col:
+    assert not col.decks.card_count(1, True)
+r = c.get("/deck/1/custom")
+assert r.status_code == 200 and str(r.url).endswith("/deck/1") and "hidden from the deck list" in r.text, (r.url, r.text[-1500:])
+for form in ({"mode": "new", "new_delta": "5"}, {"mode": "forgot", "forgot_days": "1"}):
+    r = c.post("/deck/1/custom", data=form)
+    assert r.status_code == 200 and "/deck/1" in str(r.url) and flash(r), (r.status_code, r.url, flash(r))
+ok("custom study on the hidden empty Default deck explains instead of failing")
+
 # --- congratulations screen points to custom study ---
 with webapp.collection("tester") as col:
     col.sched.suspend_cards(col.find_cards(f"did:{d}"))

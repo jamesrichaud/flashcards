@@ -12,11 +12,14 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 
 from anki import scheduler_pb2
 from anki.consts import DYN_MAX_SIZE
-from anki.errors import CustomStudyError
+from anki.errors import CustomStudyError, NotFoundError
 
 import app as core
 
 router = APIRouter()
+# The engine leaves an empty "Default" deck out of its deck tree (desktop Anki hides it), and its
+# custom study calls then fail with NotFoundError; Anki gives no way to get there, so say why.
+NOT_IN_TREE = "!Custom study isn't available here: this deck is empty and hidden from the deck list."
 Req = scheduler_pb2.CustomStudyRequest
 Cram = Req.Cram
 
@@ -158,7 +161,11 @@ def custom_page(request: Request, did: int, mode: str = "new"):
         if deck.get("dyn"):
             core.set_flash(request, "!Custom study is only available for normal decks.")
             return RedirectResponse(f"/deck/{did}", 303)
-        body = custom_html(col, did, mode if mode in MODES else "new")
+        try:
+            body = custom_html(col, did, mode if mode in MODES else "new")
+        except NotFoundError:
+            core.set_flash(request, NOT_IN_TREE)
+            return RedirectResponse(f"/deck/{did}", 303)
     return core.page("Custom study", body, user, "decks", core.take_flash(request))
 
 
@@ -181,6 +188,9 @@ async def custom_save(request: Request, did: int):
             core.set_flash(request, "!" + str(e))
             back = form.get("mode") if form.get("mode") in MODES else "new"
             return RedirectResponse(f"/deck/{did}/custom?mode={back}", 303)
+        except NotFoundError:
+            core.set_flash(request, NOT_IN_TREE)
+            return RedirectResponse(f"/deck/{did}", 303)
         if mode in ("new", "rev"):
             core.select_deck(col, did)
             core.set_flash(request, "Today's limit was changed.")

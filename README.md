@@ -4,21 +4,33 @@ A web flashcard app that runs on Anki's real engine, so scheduling (FSRS), cloze
 and .apkg import/export behave exactly like Anki. Made for iPad and Chromebook use in a browser.
 
 ## What it does
-- Log in, with a separate set of cards per person
-- Decks and subdecks, with New / Learning / Due counts
-- Study screen with Again / Hard / Good / Easy and Anki's real intervals, plus undo
-- Keyboard shortcuts: Space shows the answer, 1-4 answer the card
-- Add and edit cards: Basic, Basic (and reversed), Cloze, plus images and audio
-- Import .apkg decks (including shared decks from AnkiWeb, with their images and audio) with Anki's import options
-- Import text files (CSV/TSV/TXT) with separator, note type, deck, field mapping, tags and duplicate handling
-- Import a whole collection (.colpkg), replacing everything after a confirm and a backup
-- Export the collection (.colpkg), a deck or Browse search (.apkg), or notes/cards as plain text
-- Browse cards using Anki's search syntax (deck:, tag:, is:due, ...)
-- Deck options: new cards per day, reviews per day, desired retention
-- Stats: today, last 7 days, collection totals
-- FSRS on/off, password change, adding more people
-- Server-side add-ons (card render, after answer, extra pages) with an Add-ons page; desktop Anki add-ons don't run here
-- All your devices share the same cards; sync with AnkiDroid, AnkiMobile and desktop Anki through Anki's own sync server (or AnkiWeb)
+Everything runs on Anki's own engine, so cards, scheduling and files stay compatible with Anki.
+
+**Studying**
+- Decks and subdecks with New / Learning / Due counts; collapse/expand, rename, move under another deck, descriptions, "studied N cards in M minutes today"
+- Study screen with Again / Hard / Good / Easy and Anki's intervals (SM-2 or FSRS); Again comes back in the same session
+- Keyboard as in Anki: Space shows the answer, 1-4 answer, `-` bury, `@` suspend, `*` mark, Ctrl+1..7 flags, R replays audio, Ctrl+Z undo
+- Type-in-the-answer cards with Anki's comparison, audio auto-play and replay, MathJax, leech notice
+- Card actions: suspend, bury card or note, flags, mark, reset to new, set due date, edit and come back to the same card, card info with full review history
+- Optional "tap the card to answer" for iPads (left half Again, right half Good)
+- Custom study (raise today's limits, forgotten cards, review ahead, preview new, by state or tag) and filtered decks
+- Deck options with presets: steps, intervals, limits, order, burying, leeches, ease, FSRS retention and Optimize
+- Undo and redo of everything, with a message saying what was undone
+
+**Cards and note types**
+- Rich editor for Add/Edit: formatting, colours, lists, cloze buttons and keys, pictures, audio recording, MathJax, sticky fields, duplicate warning, preview
+- Image occlusion (rectangles and ellipses, hide all or hide one), compatible with desktop Anki
+- Note type manager: stock types, fields, card templates with live preview, change note type
+- Browse with Anki's search syntax: cards or notes, sortable columns, flags and suspended shown, bulk change deck, tags, suspend, delete, reset, reposition, find and replace
+
+**Files, stats and upkeep**
+- Import .apkg (shared decks from AnkiWeb, with media), .colpkg (whole collection, after a confirm and a backup) and CSV/TSV/TXT with field mapping; export .colpkg, .apkg and plain text
+- Statistics with Anki's graphs (future due, calendar, reviews, card counts, intervals, ease or FSRS difficulty/stability/retrievability, hours, buttons, added, retention) for a deck or everything
+- Preferences: next day starts at, learn ahead, timebox, counts and next times on buttons, light/dark/system theme
+- Check database, check media, empty cards, daily backups (30 kept) with restore
+- Separate cards per person; all devices share the same cards; sync with AnkiDroid, AnkiMobile and desktop Anki through Anki's own sync server (or AnkiWeb)
+- Server-side add-ons (card render, after answer, extra pages); desktop Anki add-ons don't run here
+- Works on iPad and Chromebook: Add to Home Screen / install, 44px touch targets, safe areas, dark mode, offline page
 
 ## Run it on the home server
 ```
@@ -109,9 +121,11 @@ full rights, so only install files you trust.
 
 ## Tests
 ```
-python3 tests/test_engine.py   # Anki engine: decks, cloze, import/export, FSRS reviews
-python3 tests/test_app.py      # whole app, end to end, acting as a user
-python3 tests/test_sync.py     # two browsers, and syncing through Anki's sync server
+python3 tests/run_all.py         # every tests/test_*.py file, each in its own process
+python3 tests/test_engine.py     # Anki engine: decks, cloze, import/export, FSRS reviews
+python3 tests/test_app.py        # whole app, end to end, acting as a user
+python3 tests/test_regression.py # visits every page the app links to and checks each one
+python3 tests/shots_all.py       # screenshots of every page at iPad and Chromebook sizes (needs Playwright + Chromium)
 ```
 
 ## Licence

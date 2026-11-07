@@ -30,4 +30,5 @@ If an item fails twice, mark it `- [~]` with a one-line reason under it and move
 - [x] Add-ons: a simple server-side add-on system (Python files in `data/addons/` with hooks: card render filter, after answer, extra page routes) and an Add-ons page to enable/disable. Document that desktop Anki add-ons do not run here.
 
 ## Final
-- [ ] Full regression: run all tests, take Playwright screenshots of every page at iPad (820x1180) and Chromebook (1366x768) sizes into `shots/`, fix anything broken or ugly, update README feature list.
+- [x] Full regression: run all tests, take Playwright screenshots of every page at iPad (820x1180) and Chromebook (1366x768) sizes into `shots/`, fix anything broken or ugly, update README feature list.
+  Screenshots not taken: Chromium can't start on this machine (missing system libraries, no sudo); run `python3 tests/shots_all.py` once it can.
