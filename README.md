@@ -27,7 +27,7 @@ Everything runs on Anki's own engine, so cards, scheduling and files stay compat
 - Browse sidebar like Anki's: saved searches, Today, flags, card states, deck tree, note types and card types, hierarchical tags (rename, delete, clear unused); a slide-out panel on iPad
 
 **Files, stats and upkeep**
-- Import .apkg (shared decks from AnkiWeb, with media), .colpkg (whole collection, after a confirm and a backup) and CSV/TSV/TXT with field mapping; export .colpkg, .apkg and plain text
+- Import .apkg (shared decks from AnkiWeb, with media, from a file or by pasting a link: the server downloads it with a progress bar), .colpkg (whole collection, after a confirm and a backup) and CSV/TSV/TXT with field mapping; export .colpkg, .apkg and plain text
 - Statistics with Anki's graphs (future due, calendar, reviews, card counts, intervals, ease or FSRS difficulty/stability/retrievability, hours, buttons, added, retention) for a deck or everything
 - Preferences: next day starts at, learn ahead, timebox, counts and next times on buttons, light/dark/system theme
 - Languages: English, Español, Français, Deutsch, Português, Italiano, Gaeilge, Polski; each person picks one in Preferences (default: the browser's language); Anki's own wording is used where Anki has it

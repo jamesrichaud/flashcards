@@ -1432,6 +1432,8 @@ from flashcards import image_occlusion  # noqa: E402
 app.include_router(image_occlusion.router)
 from flashcards import import_export  # noqa: E402
 app.include_router(import_export.router)
+from flashcards import shared_decks  # noqa: E402
+app.include_router(shared_decks.router)
 from flashcards import media as media_check  # noqa: E402
 app.include_router(media_check.router)
 from flashcards import stats as stats_page  # noqa: E402

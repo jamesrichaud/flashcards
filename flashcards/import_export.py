@@ -183,16 +183,29 @@ def log_html(user):
 <tr><th>{html.escape(t("Status"))}</th><th>{html.escape(t("First field"))}</th><th>{html.escape(t("Second field"))}</th><th></th></tr>{rows}</table></div>{more}</details></div>"""
 
 
+def package_options_html(tr, p):
+    """Anki's .apkg import options (folded away), filled from the engine's saved presets."""
+    upd = lambda name, cur: (f'<select name="{name}" style="width:auto">'
+                             + options([(v, getattr(tr, key)()) for v, key in UPDATE_CHOICES], cur) + "</select>")
+    return f"""<details style="margin-top:10px"><summary class="btn">{esc(t("Options"))}</summary><div style="margin-top:8px">
+{check("with_scheduling", tr.importing_also_import_progress(), p.with_scheduling, tr.importing_include_reviews_help())}
+{check("with_deck_configs", tr.importing_with_deck_configs(), p.with_deck_configs, tr.importing_with_deck_configs_help())}
+<h4 style="margin:12px 0 0">{html.escape(tr.importing_updates())}</h4>
+{check("merge_notetypes", tr.importing_merge_notetypes(), p.merge_notetypes, tr.importing_merge_notetypes_help())}
+<div class="row"><label style="margin:0;min-width:160px;color:var(--ink);font-size:17px" title="{html.escape(tr.importing_update_notes_help())}">{html.escape(tr.importing_update_notes())}</label>{upd("update_notes", p.update_notes)}</div>
+<div class="row" style="margin-top:8px"><label style="margin:0;min-width:160px;color:var(--ink);font-size:17px" title="{html.escape(tr.importing_update_notetypes_help())}">{html.escape(tr.importing_update_notetypes())}</label>{upd("update_notetypes", p.update_notetypes)}</div>
+</div></details>"""
+
+
 # ---------- import page ----------
 @router.get("/import", response_class=HTMLResponse)
 def import_page(request: Request):
     user = core.current_user(request)
     if not user: return core.need_login(request)
+    from flashcards import shared_decks  # imports this module
     with core.collection(user) as col:
         tr = col.tr
         p = col._backend.get_import_anki_package_presets()
-    upd = lambda name, cur: (f'<select name="{name}" style="width:auto">'
-                             + options([(v, getattr(tr, key)()) for v, key in UPDATE_CHOICES], cur) + "</select>")
     body = f"""<div class="box"><h2 style="margin-top:0">{esc(t("Import a deck"))}</h2>
 <p>{core.ht(t("Choose an Anki deck file ({apkg}), for example a shared deck from ankiweb.net/shared or one exported from Anki."),
             apkg="<b>.apkg</b>")}
@@ -200,16 +213,10 @@ def import_page(request: Request):
          colpkg="<b>.colpkg</b>")}</p>
 <form method="post" action="/import" enctype="multipart/form-data"><input type="hidden" name="opts" value="1">
 <input type="file" name="file" accept=".apkg,.colpkg,.zip" required>
-<details style="margin-top:10px"><summary class="btn">{esc(t("Options"))}</summary><div style="margin-top:8px">
-{check("with_scheduling", tr.importing_also_import_progress(), p.with_scheduling, tr.importing_include_reviews_help())}
-{check("with_deck_configs", tr.importing_with_deck_configs(), p.with_deck_configs, tr.importing_with_deck_configs_help())}
-<h4 style="margin:12px 0 0">{html.escape(tr.importing_updates())}</h4>
-{check("merge_notetypes", tr.importing_merge_notetypes(), p.merge_notetypes, tr.importing_merge_notetypes_help())}
-<div class="row"><label style="margin:0;min-width:160px;color:var(--ink);font-size:17px" title="{html.escape(tr.importing_update_notes_help())}">{html.escape(tr.importing_update_notes())}</label>{upd("update_notes", p.update_notes)}</div>
-<div class="row" style="margin-top:8px"><label style="margin:0;min-width:160px;color:var(--ink);font-size:17px" title="{html.escape(tr.importing_update_notetypes_help())}">{html.escape(tr.importing_update_notetypes())}</label>{upd("update_notetypes", p.update_notetypes)}</div>
-</div></details>
+{package_options_html(tr, p)}
 <p><button class="primary">{esc(t("Import"))}</button></p></form>
 <p class="muted" style="font-size:14px">{esc(t("Large decks with lots of images can take a minute."))}</p></div>
+{shared_decks.form_html(tr, p)}
 <div class="box"><h2 style="margin-top:0">{esc(t("Import a text file"))}</h2>
 <p>{core.ht(t("Choose a {csv}, {tsv} or {txt} file with one note per line."), csv="<b>.csv</b>", tsv="<b>.tsv</b>", txt="<b>.txt</b>")}
 {esc(t("Next you can pick the separator, note type, deck and which column goes into which field."))}</p>
@@ -239,6 +246,25 @@ def package_options(form, presets):
         update_notetypes=cond("update_notetypes", presets.update_notetypes))
 
 
+def import_package(user, path, name, opts):
+    """Import an .apkg with the engine. Returns (ok, message for the person); the log goes on the Import page."""
+    with core.collection(user) as col:
+        try:
+            log = col.import_anki_package(ImportAnkiPackageRequest(package_path=path, options=opts)).log
+        except Exception as e:
+            return False, t("Import failed: {error}", error=e)
+    remember_log(user, name, log)
+    n_new = count_new(log)
+    extra = ", ".join(summary_parts(log)[1:])  # updated / skipped, if any
+    if extra:
+        return True, tn("Imported {n} new notes from {name} ({extra}). Details are on the Import page.",
+                        "Imported {n} new notes from {name} ({extra}). Details are on the Import page.",
+                        n_new, name=name, extra=extra)
+    return True, tn("Imported {n} new notes from {name}. Details are on the Import page.",
+                    "Imported {n} new notes from {name}. Details are on the Import page.",
+                    n_new, name=name)
+
+
 @router.post("/import")
 async def do_import(request: Request, file: UploadFile = File(...)):
     user = core.current_user(request)
@@ -253,23 +279,9 @@ async def do_import(request: Request, file: UploadFile = File(...)):
         return RedirectResponse(f"/import/colpkg/{token}", 303)
     up = _uploads[token]
     with core.collection(user) as col:
-        try:
-            opts = package_options(form, col._backend.get_import_anki_package_presets())
-            log = col.import_anki_package(ImportAnkiPackageRequest(package_path=up["path"], options=opts)).log
-            remember_log(user, up["name"], log)
-            n_new = count_new(log)
-            extra = ", ".join(summary_parts(log)[1:])  # updated / skipped, if any
-            if extra:
-                msg = tn("Imported {n} new notes from {name} ({extra}). Details are on the Import page.",
-                         "Imported {n} new notes from {name} ({extra}). Details are on the Import page.",
-                         n_new, name=up["name"], extra=extra)
-            else:
-                msg = tn("Imported {n} new notes from {name}. Details are on the Import page.",
-                         "Imported {n} new notes from {name}. Details are on the Import page.",
-                         n_new, name=up["name"])
-            core.set_flash(request, msg)
-        except Exception as e:
-            core.set_flash(request, "!" + t("Import failed: {error}", error=e))
+        opts = package_options(form, col._backend.get_import_anki_package_presets())
+    ok, msg = import_package(user, up["path"], up["name"], opts)
+    core.set_flash(request, msg if ok else "!" + msg)
     drop_upload(token)
     return RedirectResponse("/", 303)
 
